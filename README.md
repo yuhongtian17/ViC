@@ -1,7 +1,7 @@
 # Vision Calorimeter
 
 <p align="left">
-<a href="https://arxiv.org/abs/2408.xxxxx"><img src="https://img.shields.io/badge/arXiv-Paper-<color>"></a>
+<a href="https://arxiv.org/abs/2408.10599"><img src="https://img.shields.io/badge/arXiv-Paper-<color>"></a>
 </p>
 
 ## Abstract
@@ -10,7 +10,7 @@
 
 In high-energy physics, anti-neutrons ($\bar{n}$) are fundamental particles that frequently appear as final-state particles, and the reconstruction of their kinematic properties provides an important probe for understanding the governing principles. However, this confronts significant challenges instrumentally with the electromagnetic calorimeter (EMC), a typical experimental sensor but recovering the information of incident $\bar{n}$ insufficiently. In this study, we introduce Vision Calorimeter (ViC), a baseline method for anti-neutron reconstruction that leverages deep learning detectors to analyze the implicit relationships between EMC responses and incident $\bar{n}$ characteristics. Our motivation lies in that energy distributions of $\bar{n}$ samples deposited in the EMC cell arrays embody rich contextual information. Converted to 2-D images, such contextual energy distributions can be used to predict the status of $\bar{n}$ ($i.e.$, incident position and momentum) through a deep learning detector along with pseudo bounding boxes and a specified training objective. Experimental results demonstrate that ViC substantially outperforms the conventional reconstruction approach, reducing the prediction error of incident position by 42.81\% (from $17.31^{\circ}$ to $9.90^{\circ}$). More importantly, this study for the first time realizes the measurement of incident $\bar{n}$ momentum, underscoring the potential of deep learning detectors for particle reconstruction. Code is available at https://github.com/yuhongtian17/ViC.
 
-Full paper is available at https://arxiv.org/abs/2408.xxxxx.
+Full paper is available at https://arxiv.org/abs/2408.10599.
 
 ## Dataset
 
@@ -100,7 +100,7 @@ nohup bash ./hep.sh > nohup.log 2>&1 &
 @article{vic,
   title={Vision Calorimeter for Anti-neutron Reconstruction: A Baseline},
   author={Yu, Hongtian and Li, Yangu and Wu, Mingrui and Shen, Letian and Liu, Yue and Song, Yunxuan and Ye, Qixiang and Lyu, Xiaorui and Mao, Yajun and Zheng, Yangheng and Liu, Yunfan},
-  journal={arXiv preprint arXiv:2408.xxxxx},
+  journal={arXiv preprint arXiv:2408.10599},
   year={2024}
 }
 ```
