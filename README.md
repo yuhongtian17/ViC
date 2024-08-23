@@ -42,7 +42,8 @@ conda activate openmmlab1131
 # ref: https://pytorch.org/get-started/previous-versions/#v1131
 conda install pytorch==1.13.1 torchvision==0.14.1 torchaudio==0.13.1 pytorch-cuda=11.7 -c pytorch -c nvidia
 
-pip install shapely tqdm timm
+pip install shapely tqdm timm uproot openpyxl
+
 pip install -U openmim
 mim install mmengine
 mim install mmcv==2.0.1
@@ -58,11 +59,9 @@ cd mmdetection-3.1.0/
 pip install -r requirements/build.txt
 pip install -v -e .
 
-pip install uproot openpyxl
-
 # VMamba
-# pip install einops fvcore triton ninja
-# cd kernels/selective_scan/ && pip install . && cd ../../
+pip install einops fvcore triton ninja
+cd kernels/selective_scan/ && pip install . && cd ../../
 
 # Preparation of pre-trained model
 # Suggest storing *.pth files under "./data/pretrained/"!
@@ -80,6 +79,7 @@ python ./vheat_tools/interpolate4downstream.py --pt_pth 'data/pretrained/vHeat_t
 ```shell
 # Try MMDetection First
 CUDA_VISIBLE_DEVICES=0,1 ./tools/dist_train.sh ./configs/retinanet/retinanet_r50_fpn_1x_coco.py 2
+CUDA_VISIBLE_DEVICES=0,1 ./tools/dist_train.sh ./configs/swin/retinanet_swin-t-p4-w7_fpn_1x_coco.py 2
 
 # Train ViC
 CUDA_VISIBLE_DEVICES=0,1,2,3 PORT=33010 ./tools/dist_train.sh ./configs/_hep2coco_/retinanet_swin-tiny_fpn_1x_hep2coco.py 4
@@ -92,6 +92,15 @@ python ./tools/analysis_tools/hep_eval.py --pkl "./work_dirs/retinanet_swin-tiny
 
 # nohup a shell file
 nohup bash ./hep.sh > nohup.log 2>&1 &
+```
+
+## Bugs Report
+
+An error may occur on the new server: "ImportError: libGL.so.1: cannot open shared object file: No such file or directory." It can be solved by the following shell command:
+
+```shell
+sudo apt update
+sudo apt install libgl1-mesa-glx
 ```
 
 ## Citation
