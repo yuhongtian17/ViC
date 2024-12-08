@@ -19,7 +19,7 @@ from mmdet.structures.mask import BitmapMasks, PolygonMasks
 from mmdet.datasets.transforms.loading import LoadAnnotations
 from mmdet.datasets.transforms.formatting import PackDetInputs
 
-from tools.dataset_converters.root_to_json import load_rgb
+from tools.dataset_converters.root_to_utils import load_rgb
 
 
 @TRANSFORMS.register_module()
@@ -36,6 +36,7 @@ class LoadImageFromHEPeng(LoadImageFromFile):
     - n_hit
     - m_eng
     - xyxy
+    - m_time
 
     Modified Keys:
 
@@ -52,13 +53,17 @@ class LoadImageFromHEPeng(LoadImageFromFile):
     def __init__(self,
                  # https://github.com/open-mmlab/mmcv/blob/main/mmcv/transforms/loading.py
                  to_float32: bool = True,
+                 with_time: int = 0,
                  bg_version: Optional[str] = None,
-                 snr_db: float = 30.0,
+                 snr_db: float = 10.0,
+                 # json_path: Optional[str] = None,
                  **kwargs) -> None:
         super().__init__(to_float32=to_float32, **kwargs)
 
+        self.with_time = with_time
         self.bg_version = bg_version
         self.snr_db = snr_db
+        # self.json_path = json_path
 
     def transform(self, results: dict) -> dict:
         """Transform function to add image meta information.
@@ -74,8 +79,10 @@ class LoadImageFromHEPeng(LoadImageFromFile):
         # img = results['img']
         img = load_rgb(
             single_image = results,
+            with_time = self.with_time,
             bg_version = self.bg_version,
             snr_db = self.snr_db,
+            # json_path = self.json_path,
         )
         if self.to_float32:
             img = img.astype(np.float32)
@@ -88,22 +95,23 @@ class LoadImageFromHEPeng(LoadImageFromFile):
 
 
 @TRANSFORMS.register_module()
-class LoadHEPAnnotations(LoadAnnotations):
+class HEPLoadAnnotations(LoadAnnotations):
     def __init__(
             self,
-            with_eng: bool = False,
+            with_mmt: bool = True,
             **kwargs) -> None:
         super().__init__(**kwargs)
-        self.with_eng = with_eng
+        self.with_mmt = with_mmt
 
-    def _load_engs(self, results: dict) -> None:
-        gt_engs = []
+    def _load_mmts(self, results: dict) -> None:
+        gt_mmt_regs = []
         for instance in results.get('instances', []):
-            gt_engs.append([instance['p_RM'], ])
+            gt_mmt_regs.append([instance['p_RM'], ])
+
         if self.box_type is None:
-            results['gt_engs'] = np.array(gt_engs, dtype=np.float32).reshape((-1, 1))
+            results['gt_mmt_regs'] = np.array(gt_mmt_regs, dtype=np.float32).reshape((-1, 1))
         else:
-            results['gt_engs'] = torch.tensor(gt_engs, dtype=torch.float32).reshape((-1, 1))
+            results['gt_mmt_regs'] = torch.tensor(gt_mmt_regs, dtype=torch.float32).reshape((-1, 1))
 
     def transform(self, results: dict) -> dict:
         """Function to load multiple types annotations.
@@ -118,8 +126,8 @@ class LoadHEPAnnotations(LoadAnnotations):
 
         if self.with_bbox:
             self._load_bboxes(results)
-        if self.with_eng:                                                                           # eng
-            self._load_engs(results)                                                                # eng
+        if self.with_mmt:                                                                           # mmt
+            self._load_mmts(results)                                                                # mmt
         if self.with_label:
             self._load_labels(results)
         if self.with_mask:
@@ -131,7 +139,7 @@ class LoadHEPAnnotations(LoadAnnotations):
     def __repr__(self) -> str:
         repr_str = self.__class__.__name__
         repr_str += f'(with_bbox={self.with_bbox}, '
-        repr_str += f'with_eng={self.with_eng}, '                                                   # eng
+        repr_str += f'with_mmt={self.with_mmt}, '                                                   # mmt
         repr_str += f'with_label={self.with_label}, '
         repr_str += f'with_mask={self.with_mask}, '
         repr_str += f'with_seg={self.with_seg}, '
@@ -142,11 +150,11 @@ class LoadHEPAnnotations(LoadAnnotations):
 
 
 @TRANSFORMS.register_module()
-class PackHEPDetInputs(PackDetInputs):
+class HEPPackDetInputs(PackDetInputs):
     mapping_table = {
         'gt_bboxes': 'bboxes',
-        'gt_engs': 'engs',
         'gt_bboxes_labels': 'labels',
-        'gt_masks': 'masks'
+        'gt_masks': 'masks',
+        'gt_mmt_regs': 'mmt_regs',
     }
 

@@ -88,7 +88,7 @@ class HEPSamplingResult(util_mixins.NiceRepr):
                  neg_inds: Tensor,
                  priors: Tensor,
                  gt_bboxes: Tensor,
-                 gt_engs: Tensor,                                                                   # eng
+                 gt_mmt_regs: Tensor,                                                               # mmt
                  assign_result: AssignResult,
                  gt_flags: Tensor,
                  avg_factor_with_neg: bool = True) -> None:
@@ -111,14 +111,16 @@ class HEPSamplingResult(util_mixins.NiceRepr):
             # hack for index error case
             assert self.pos_assigned_gt_inds.numel() == 0
             self.pos_gt_bboxes = gt_bboxes.view(-1, box_dim)
-            self.pos_gt_engs = gt_engs.view(-1, 1)                                                  # eng
+
+            self.pos_gt_mmt_regs = gt_mmt_regs.view(-1, 1)                                          # mmt
         else:
             if len(gt_bboxes.shape) < 2:
                 gt_bboxes = gt_bboxes.view(-1, box_dim)
             self.pos_gt_bboxes = gt_bboxes[self.pos_assigned_gt_inds.long()]
-            if len(gt_engs.shape) < 2:                                                              # eng
-                gt_engs = gt_engs.view(-1, 1)                                                       # eng
-            self.pos_gt_engs = gt_engs[self.pos_assigned_gt_inds.long()]                            # eng
+
+            if len(gt_mmt_regs.shape) < 2:                                                          # mmt
+                gt_mmt_regs = gt_mmt_regs.view(-1, 1)                                               # mmt
+            self.pos_gt_mmt_regs = gt_mmt_regs[self.pos_assigned_gt_inds.long()]                    # mmt
 
     @property
     def priors(self):
@@ -222,8 +224,8 @@ class HEPSamplingResult(util_mixins.NiceRepr):
         gt_bboxes = random_boxes(assign_result.num_gts, rng=rng)
         # gt_labels = torch.randint(
         #     0, 5, (assign_result.num_gts, ), dtype=torch.long)
-        gt_labels = torch.zeros((assign_result.num_gts, ), dtype=torch.long)                        # eng
-        gt_engs = torch.zeros((assign_result.num_gts, 1))                                           # eng
+        gt_labels = torch.zeros((assign_result.num_gts, ), dtype=torch.long)                        # mmt
+        gt_mmt_regs = torch.zeros((assign_result.num_gts, 1))                                       # mmt
 
         pred_instances = InstanceData()
         pred_instances.priors = priors
@@ -231,7 +233,7 @@ class HEPSamplingResult(util_mixins.NiceRepr):
         gt_instances = InstanceData()
         gt_instances.bboxes = gt_bboxes
         gt_instances.labels = gt_labels
-        gt_instances.engs = gt_engs                                                                 # eng
+        gt_instances.mmt_regs = gt_mmt_regs                                                         # mmt
 
         add_gt_as_proposals = True
 

@@ -14,13 +14,14 @@ from .base_det_dataset import BaseDetDataset
 class Hep2CocoDataset(BaseDetDataset):
     """Dataset for HEP2COCO.
 
-    DO NOT MODIFY: self.load_data_list(), self.filter_data()
-    Modified:      self.parse_data_info()
+    DO NOT MODIFY: self.load_data_list()
+    Modified:      self.parse_data_info(), self.filter_data()
     """
 
     METAINFO = {
         'classes':
-        ('Nm', 'Lmdm', 'Np', 'Lmdp'),
+        # ('Nm', 'Np', 'Lmdm', 'Lmdp'),
+        ('Nm', 'Np'),
         # palette is a list of color tuples, which is used for visualization.
         'palette':
         [(220, 20, 60), (119, 11, 32), (0, 0, 142), (0, 0, 230), (106, 0, 228),
@@ -47,6 +48,15 @@ class Hep2CocoDataset(BaseDetDataset):
     COCOAPI = COCO
     # ann_id is unique in coco dataset.
     ANN_ID_UNIQUE = True
+
+    def __init__(self,
+                 *args,
+                 p_RM_thr: float = 0.0,
+                 btr_eng_thr: float = 0.0,
+                 **kwargs) -> None:
+        self.p_RM_thr = p_RM_thr
+        self.btr_eng_thr = btr_eng_thr
+        super().__init__(*args, **kwargs)
 
     def load_data_list(self) -> List[dict]:
         """Load annotations from an annotation file named as ``self.ann_file``
@@ -123,6 +133,7 @@ class Hep2CocoDataset(BaseDetDataset):
         data_info['n_hit'] = img_info['n_hit']
         data_info['m_eng'] = img_info['m_eng']
         data_info['xyxy'] = img_info['xyxy']
+        data_info['m_time'] = img_info['m_time']
 
         if self.return_classes:
             data_info['text'] = self.metainfo['classes']
@@ -160,6 +171,12 @@ class Hep2CocoDataset(BaseDetDataset):
             instance['phi_RM'] = ann['phi_RM']
             instance['the_RM'] = ann['the_RM']
 
+            # NEW!
+            if ann['p_RM'] < self.p_RM_thr:
+                continue
+            if ann['btr_eng'] < self.btr_eng_thr:
+                continue
+
             instances.append(instance)
         data_info['instances'] = instances
         return data_info
@@ -195,6 +212,9 @@ class Hep2CocoDataset(BaseDetDataset):
             width = data_info['width']
             height = data_info['height']
             if filter_empty_gt and img_id not in ids_in_cat:
+                continue
+            # NEW!
+            if filter_empty_gt and len(data_info['instances']) == 0:
                 continue
             if min(width, height) >= min_size:
                 valid_data_infos.append(data_info)

@@ -26,7 +26,7 @@ class HEPPseudoSampler(BaseSampler):
         raise NotImplementedError
 
     def sample(self, assign_result: AssignResult, pred_instances: InstanceData,
-               gt_instances: InstanceData, *args, **kwargs) -> HEPSamplingResult:                   # eng
+               gt_instances: InstanceData, *args, **kwargs) -> HEPSamplingResult:                   # mmt
         """Directly returns the positive and negative indices  of samples.
 
         Args:
@@ -45,7 +45,7 @@ class HEPPseudoSampler(BaseSampler):
         gt_bboxes = gt_instances.bboxes
         priors = pred_instances.priors
 
-        gt_engs = gt_instances.engs                                                                 # eng
+        gt_mmt_regs = gt_instances.mmt_regs                                                         # mmt
 
         pos_inds = torch.nonzero(
             assign_result.gt_inds > 0, as_tuple=False).squeeze(-1).unique()
@@ -58,7 +58,7 @@ class HEPPseudoSampler(BaseSampler):
             neg_inds=neg_inds,
             priors=priors,
             gt_bboxes=gt_bboxes,
-            gt_engs=gt_engs,                                                                        # eng
+            gt_mmt_regs=gt_mmt_regs,                                                                # mmt
             assign_result=assign_result,
             gt_flags=gt_flags,
             avg_factor_with_neg=False)

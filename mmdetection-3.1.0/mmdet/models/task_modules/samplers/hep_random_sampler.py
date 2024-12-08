@@ -34,7 +34,7 @@ class HEPRandomSampler(BaseSampler):
                  neg_pos_ub: int = -1,
                  add_gt_as_proposals: bool = True,
                  **kwargs):
-        from .sampling_result import ensure_rng
+        from .hep_sampling_result import ensure_rng                                                 # mmt
         super().__init__(
             num=num,
             pos_fraction=pos_fraction,
@@ -114,7 +114,7 @@ class HEPRandomSampler(BaseSampler):
             return self.random_choice(neg_inds, num_expected)
 
     def sample(self, assign_result: AssignResult, pred_instances: InstanceData,
-               gt_instances: InstanceData, **kwargs) -> HEPSamplingResult:                          # eng
+               gt_instances: InstanceData, **kwargs) -> HEPSamplingResult:                          # mmt
         """Sample positive and negative bboxes.
 
         This is a simple implementation of bbox sampling given candidates,
@@ -162,7 +162,7 @@ class HEPRandomSampler(BaseSampler):
 
         # print(gt_instances.all_keys())
         # exit()
-        gt_engs = gt_instances.engs                                                                 # eng
+        gt_mmt_regs = gt_instances.mmt_regs                                                         # mmt
 
         if len(priors.shape) < 2:
             priors = priors[None, :]
@@ -203,7 +203,7 @@ class HEPRandomSampler(BaseSampler):
             neg_inds=neg_inds,
             priors=priors,
             gt_bboxes=gt_bboxes,
-            gt_engs=gt_engs,                                                                        # eng
+            gt_mmt_regs=gt_mmt_regs,                                                                # mmt
             assign_result=assign_result,
             gt_flags=gt_flags)
         return sampling_result

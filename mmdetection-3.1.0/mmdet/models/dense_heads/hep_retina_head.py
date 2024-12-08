@@ -1,48 +1,69 @@
-# Copyright (c) OpenMMLab. All rights reserved.
+# # Copyright (c) OpenMMLab. All rights reserved.
+# import copy
+# from abc import ABCMeta, abstractmethod
+# from inspect import signature
+# from typing import List, Optional, Tuple
+
+# import torch
+# from mmcv.ops import batched_nms
+# from mmengine.config import ConfigDict
+# from mmengine.model import BaseModule, constant_init
+# from mmengine.structures import InstanceData
+# from torch import Tensor
+
+# from mmdet.structures import SampleList
+# from mmdet.structures.bbox import (cat_boxes, get_box_tensor, get_box_wh,
+#                                    scale_boxes)
+# from mmdet.utils import InstanceList, OptMultiConfig
+# from ..test_time_augs import merge_aug_results
+# from ..utils import (filter_scores_and_topk, select_single_mlvl,
+#                      unpack_gt_instances)
+
+# # Copyright (c) OpenMMLab. All rights reserved.
+# import warnings
+# from typing import List, Optional, Tuple, Union
+
+# import torch
+# import torch.nn as nn
+# from mmengine.structures import InstanceData
+# from torch import Tensor
+
+# from mmdet.registry import MODELS, TASK_UTILS
+# from mmdet.structures.bbox import BaseBoxes, cat_boxes, get_box_tensor
+# from mmdet.utils import (ConfigType, InstanceList, OptConfigType,
+#                          OptInstanceList, OptMultiConfig)
+# from ..task_modules.prior_generators import (AnchorGenerator,
+#                                              anchor_inside_flags)
+# from ..task_modules.samplers import PseudoSampler
+# from ..utils import images_to_levels, multi_apply, unmap
+# from .base_dense_head import BaseDenseHead
+
+# # Copyright (c) OpenMMLab. All rights reserved.
+# import torch.nn as nn
+# from mmcv.cnn import ConvModule
+
+# from mmdet.registry import MODELS
+# from .anchor_head import AnchorHead
+
+
 import copy
-from abc import ABCMeta, abstractmethod
-from inspect import signature
-from typing import List, Optional, Tuple
-
-import torch
-from mmcv.ops import batched_nms
-from mmengine.config import ConfigDict
-from mmengine.model import BaseModule, constant_init
-from mmengine.structures import InstanceData
-from torch import Tensor
-
-from mmdet.structures import SampleList
-from mmdet.structures.bbox import (cat_boxes, get_box_tensor, get_box_wh,
-                                   scale_boxes)
-from mmdet.utils import InstanceList, OptMultiConfig
-from ..test_time_augs import merge_aug_results
-from ..utils import (filter_scores_and_topk, select_single_mlvl,
-                     unpack_gt_instances)
-
-# Copyright (c) OpenMMLab. All rights reserved.
-import warnings
 from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-from mmengine.structures import InstanceData
 from torch import Tensor
-
-from mmdet.registry import MODELS, TASK_UTILS
-from mmdet.structures.bbox import BaseBoxes, cat_boxes, get_box_tensor
-from mmdet.utils import (ConfigType, InstanceList, OptConfigType,
-                         OptInstanceList, OptMultiConfig)
-from ..task_modules.prior_generators import (AnchorGenerator,
-                                             anchor_inside_flags)
-from ..task_modules.samplers import PseudoSampler
-from ..utils import images_to_levels, multi_apply, unmap
-from .base_dense_head import BaseDenseHead
-
-# Copyright (c) OpenMMLab. All rights reserved.
-import torch.nn as nn
+from mmengine.config import ConfigDict
+from mmengine.structures import InstanceData
 from mmcv.cnn import ConvModule
 
 from mmdet.registry import MODELS
+from mmdet.structures.bbox import BaseBoxes, cat_boxes, get_box_tensor
+from mmdet.utils import InstanceList, OptInstanceList
+
+from ..task_modules.prior_generators import anchor_inside_flags
+from ..utils import (images_to_levels, multi_apply, unmap,
+                     filter_scores_and_topk, select_single_mlvl)
+
 from .anchor_head import AnchorHead
 
 
@@ -72,9 +93,9 @@ class HEPRetinaHead(AnchorHead):
                  stacked_convs=4,
                  conv_cfg=None,
                  norm_cfg=None,
-                 eng_mean = 0.0,                                                                    # eng
-                 eng_std = 1.0,                                                                     # eng
-                 loss_eng=dict(type='L1Loss', loss_weight=1.0),                                     # eng
+                 mmt_mean = 0.0,                                                                    # mmt
+                 mmt_std = 1.0,                                                                     # mmt
+                 loss_mmt_reg = None,                                                               # mmt
                  anchor_generator=dict(
                      type='AnchorGenerator',
                      octave_base_scale=4,
@@ -97,6 +118,11 @@ class HEPRetinaHead(AnchorHead):
         self.stacked_convs = stacked_convs
         self.conv_cfg = conv_cfg
         self.norm_cfg = norm_cfg
+
+        self.mmt_mean = mmt_mean                                                                    # mmt
+        self.mmt_std = mmt_std                                                                      # mmt
+        self.use_mmt_reg = (loss_mmt_reg is not None)                                               # mmt
+
         super().__init__(
             num_classes,
             in_channels,
@@ -104,16 +130,13 @@ class HEPRetinaHead(AnchorHead):
             init_cfg=init_cfg,
             **kwargs)
 
-        self.eng_mean = eng_mean                                                                    # eng
-        self.eng_std = eng_std                                                                      # eng
-        self.loss_eng = MODELS.build(loss_eng)                                                      # eng
+        if self.use_mmt_reg: self.loss_mmt_reg = MODELS.build(loss_mmt_reg)                         # mmt
 
     def _init_layers(self):
         """Initialize layers of the head."""
         self.relu = nn.ReLU(inplace=True)
         self.cls_convs = nn.ModuleList()
         self.reg_convs = nn.ModuleList()
-        self.eng_convs = nn.ModuleList()                                                            # eng
         in_channels = self.in_channels
         for i in range(self.stacked_convs):
             self.cls_convs.append(
@@ -134,15 +157,6 @@ class HEPRetinaHead(AnchorHead):
                     padding=1,
                     conv_cfg=self.conv_cfg,
                     norm_cfg=self.norm_cfg))
-            self.eng_convs.append(                                                                  # eng
-                ConvModule(
-                    in_channels,
-                    self.feat_channels,
-                    3,
-                    stride=1,
-                    padding=1,
-                    conv_cfg=self.conv_cfg,
-                    norm_cfg=self.norm_cfg))
             in_channels = self.feat_channels
         self.retina_cls = nn.Conv2d(
             in_channels,
@@ -152,8 +166,25 @@ class HEPRetinaHead(AnchorHead):
         reg_dim = self.bbox_coder.encode_size
         self.retina_reg = nn.Conv2d(
             in_channels, self.num_base_priors * reg_dim, 3, padding=1)
-        self.retina_eng = nn.Conv2d(                                                                # eng
-            in_channels, self.num_base_priors * 1, 3, padding=1)
+
+        if self.use_mmt_reg:                                                                        # mmt
+            self.mmt_reg_convs = nn.ModuleList()
+
+            dim = self.in_channels
+            for j in range(self.stacked_convs):
+                self.mmt_reg_convs.append(
+                    ConvModule(
+                        dim,
+                        self.feat_channels,
+                        3,
+                        stride=1,
+                        padding=1,
+                        conv_cfg=self.conv_cfg,
+                        norm_cfg=self.norm_cfg))
+                dim = self.feat_channels
+
+            self.retina_mmt_reg = nn.Conv2d(
+                dim, self.num_base_priors * 1, 3, padding=1)
 
     def forward_single(self, x):
         """Forward feature of a single scale level.
@@ -170,23 +201,67 @@ class HEPRetinaHead(AnchorHead):
         """
         cls_feat = x
         reg_feat = x
-        eng_feat = x                                                                                # eng
         for cls_conv in self.cls_convs:
             cls_feat = cls_conv(cls_feat)
         for reg_conv in self.reg_convs:
             reg_feat = reg_conv(reg_feat)
-        for eng_conv in self.eng_convs:                                                             # eng
-            eng_feat = eng_conv(eng_feat)
         cls_score = self.retina_cls(cls_feat)
         bbox_pred = self.retina_reg(reg_feat)
-        eng_pred  = self.retina_eng(eng_feat)                                                       # eng
-        return cls_score, bbox_pred, eng_pred
+        return cls_score, bbox_pred
 
-    def eng_encode(self, gt_engs) -> Tensor:
-        return (torch.log(gt_engs) - self.eng_mean) / self.eng_std
+    def forward_mmt(self, x):
+        """Forward feature of a single scale level.
 
-    def eng_decode(self, pred_engs) -> Tensor:
-        return torch.exp(pred_engs * self.eng_std + self.eng_mean)
+        Args:
+            x (Tensor): Features of a single scale level.
+
+        Returns:
+            tuple:
+                mmt_reg_pred (Tensor): momenta by regression for a single scale level
+                    the channels number is num_anchors * 1.
+        """
+        if self.use_mmt_reg:
+            for mmt_reg_conv in self.mmt_reg_convs:
+                x = mmt_reg_conv(x)
+            mmt_reg_pred = self.retina_mmt_reg(x)
+        else:
+            mmt_reg_pred = None
+
+        return mmt_reg_pred, None
+
+    def forward(self, x: Tuple[Tensor]) -> Tuple[List[Tensor]]:
+        """Forward features from the upstream network.
+
+        Args:
+            x (tuple[Tensor]): Features from the upstream network, each is
+                a 4D-tensor.
+
+        Returns:
+            tuple: A tuple of classification scores and bbox prediction.
+
+                - cls_scores (list[Tensor]): Classification scores for all \
+                    scale levels, each is a 4D-tensor, the channels number \
+                    is num_base_priors * num_classes.
+                - bbox_preds (list[Tensor]): Box energies / deltas for all \
+                    scale levels, each is a 4D-tensor, the channels number \
+                    is num_base_priors * 4.
+                - mmt_reg_preds (list[Tensor]): momenta by regression for all \
+                    scale levels, each is a 4D-tensor, the channels number \
+                    is num_base_priors * 1.
+        """
+        x_for_single = x
+        x_for_mmt = x
+
+        cls_scores, bbox_preds = multi_apply(self.forward_single, x_for_single)
+        mmt_reg_preds, None_list = multi_apply(self.forward_mmt, x_for_mmt)
+
+        return cls_scores, bbox_preds, mmt_reg_preds
+
+    def mmt_encode(self, gt_mmts) -> Tensor:
+        return (torch.log(gt_mmts) - self.mmt_mean) / self.mmt_std
+
+    def mmt_decode(self, pred_mmts) -> Tensor:
+        return torch.exp(pred_mmts * self.mmt_std + self.mmt_mean)
 
 
     # ##### ##### ##### ##### ##### #####   from anchor_head.py   ##### ##### ##### ##### ##### ##### #
@@ -256,8 +331,12 @@ class HEPRetinaHead(AnchorHead):
         bbox_targets = anchors.new_zeros(num_valid_anchors, target_dim)
         bbox_weights = anchors.new_zeros(num_valid_anchors, target_dim)
 
-        eng_targets = anchors.new_zeros(num_valid_anchors, 1)                                       # eng
-        eng_weights = anchors.new_zeros(num_valid_anchors, 1)                                       # eng
+        if self.use_mmt_reg:                                                                        # mmt
+            mmt_reg_targets = anchors.new_zeros(num_valid_anchors, 1)
+            mmt_reg_weights = anchors.new_zeros(num_valid_anchors, 1)
+        else:
+            mmt_reg_targets = None
+            mmt_reg_weights = None
 
         # TODO: Considering saving memory, is it necessary to be long?
         labels = anchors.new_full((num_valid_anchors, ),
@@ -280,16 +359,18 @@ class HEPRetinaHead(AnchorHead):
             bbox_targets[pos_inds, :] = pos_bbox_targets
             bbox_weights[pos_inds, :] = 1.0
 
-            # 由于loss_eng无法使用`IouLoss`, `GIouLoss`等损失函数，因此必须gt预编码而非pred预解码！
-            pos_eng_targets = self.eng_encode(sampling_result.pos_gt_engs)                          # eng
-            eng_targets[pos_inds, :] = pos_eng_targets                                              # eng
-            eng_weights[pos_inds, :] = 1.0                                                          # eng
+            if self.use_mmt_reg:                                                                    # mmt
+                # 由于loss_mmt_reg无法使用`IouLoss`, `GIouLoss`等损失函数，因此必须对gt预编码而非对pred预解码！
+                pos_mmt_reg_targets = self.mmt_encode(sampling_result.pos_gt_mmt_regs)
+                mmt_reg_targets[pos_inds, :] = pos_mmt_reg_targets
+                mmt_reg_weights[pos_inds, :] = 1.0
 
             labels[pos_inds] = sampling_result.pos_gt_labels
             if self.train_cfg['pos_weight'] <= 0:
                 label_weights[pos_inds] = 1.0
             else:
                 label_weights[pos_inds] = self.train_cfg['pos_weight']
+
         if len(neg_inds) > 0:
             label_weights[neg_inds] = 1.0
 
@@ -303,11 +384,13 @@ class HEPRetinaHead(AnchorHead):
                                   inside_flags)
             bbox_targets = unmap(bbox_targets, num_total_anchors, inside_flags)
             bbox_weights = unmap(bbox_weights, num_total_anchors, inside_flags)
-            eng_targets = unmap(eng_targets, num_total_anchors, inside_flags)                       # eng
-            eng_weights = unmap(eng_weights, num_total_anchors, inside_flags)                       # eng
+
+            if self.use_mmt_reg:                                                                    # mmt
+                mmt_reg_targets = unmap(mmt_reg_targets, num_total_anchors, inside_flags)
+                mmt_reg_weights = unmap(mmt_reg_weights, num_total_anchors, inside_flags)
 
         return (labels, label_weights, bbox_targets, bbox_weights, 
-                eng_targets, eng_weights,                                                           # eng
+                mmt_reg_targets, mmt_reg_weights,                                                   # mmt
                 pos_inds, neg_inds, sampling_result)
 
     def get_targets(self,
@@ -389,9 +472,9 @@ class HEPRetinaHead(AnchorHead):
             batch_gt_instances_ignore,
             unmap_outputs=unmap_outputs)
         (all_labels, all_label_weights, all_bbox_targets, all_bbox_weights,
-         all_eng_targets, all_eng_weights,                                                          # eng
-         pos_inds_list, neg_inds_list, sampling_results_list) = results[:9]                         # eng
-        rest_results = list(results[9:])  # user-added return values
+         all_mmt_reg_targets, all_mmt_reg_weights,                                                  # mmt
+         pos_inds_list, neg_inds_list, sampling_results_list) = results[:9]                         # mmt
+        rest_results = list(results[9:])  # user-added return values                                # mmt
         # Get `avg_factor` of all images, which calculate in `SamplingResult`.
         # When using sampling method, avg_factor is usually the sum of
         # positive and negative priors. When using `PseudoSampler`,
@@ -409,10 +492,18 @@ class HEPRetinaHead(AnchorHead):
                                              num_level_anchors)
         bbox_weights_list = images_to_levels(all_bbox_weights,
                                              num_level_anchors)
-        eng_targets_list = images_to_levels(all_eng_targets, num_level_anchors)                     # eng
-        eng_weights_list = images_to_levels(all_eng_weights, num_level_anchors)                     # eng
+
+        if self.use_mmt_reg:                                                                        # mmt
+            mmt_reg_targets_list = images_to_levels(all_mmt_reg_targets,
+                                                 num_level_anchors)
+            mmt_reg_weights_list = images_to_levels(all_mmt_reg_weights,
+                                                 num_level_anchors)
+        else:
+            mmt_reg_targets_list = [None, ] * len(bbox_targets_list)
+            mmt_reg_weights_list = [None, ] * len(bbox_weights_list)
+
         res = (labels_list, label_weights_list, bbox_targets_list, bbox_weights_list,
-               eng_targets_list, eng_weights_list,                                                  # eng
+               mmt_reg_targets_list, mmt_reg_weights_list,                                          # mmt
                avg_factor)
         if return_sampling_results:
             res = res + (sampling_results_list, )
@@ -422,9 +513,9 @@ class HEPRetinaHead(AnchorHead):
         return res + tuple(rest_results)
 
     def loss_by_feat_single(self, cls_score: Tensor, bbox_pred: Tensor,
-                            eng_pred: Tensor,                                                       # eng
+                            mmt_reg_pred: Optional[Tensor],                                         # mmt
                             anchors: Tensor, labels: Tensor, label_weights: Tensor, bbox_targets: Tensor, bbox_weights: Tensor,
-                            eng_targets: Tensor, eng_weights: Tensor,                               # eng
+                            mmt_reg_targets: Optional[Tensor], mmt_reg_weights: Optional[Tensor],   # mmt
                             avg_factor: int) -> tuple:
         """Calculate the loss of a single scale level based on the features
         extracted by the detection head.
@@ -472,20 +563,23 @@ class HEPRetinaHead(AnchorHead):
             bbox_pred = get_box_tensor(bbox_pred)
         loss_bbox = self.loss_bbox(
             bbox_pred, bbox_targets, bbox_weights, avg_factor=avg_factor)
-        # energy loss                                                                               # eng
-        eng_targets = eng_targets.reshape(-1, 1)
-        eng_weights = eng_weights.reshape(-1, 1)
-        eng_pred = eng_pred.permute(0, 2, 3, 1).reshape(-1, 1)
-        # 由于loss_eng无法使用`IouLoss`, `GIouLoss`等损失函数，因此必须gt预编码而非pred预解码！
-        loss_eng = self.loss_eng(
-            eng_pred, eng_targets, eng_weights, avg_factor=avg_factor)
-        return loss_cls, loss_bbox, loss_eng                                                        # eng
+        # mmt loss
+        if self.use_mmt_reg:                                                                        # mmt
+            mmt_reg_targets = mmt_reg_targets.reshape(-1, 1)
+            mmt_reg_weights = mmt_reg_weights.reshape(-1, 1)
+            mmt_reg_pred = mmt_reg_pred.permute(0, 2, 3, 1).reshape(-1, 1)
+            # 由于loss_mmt_reg无法使用`IouLoss`, `GIouLoss`等损失函数，因此必须对gt预编码而非对pred预解码！
+            loss_mmt_reg = self.loss_mmt_reg(
+                mmt_reg_pred, mmt_reg_targets, mmt_reg_weights, avg_factor=avg_factor)
+        else:
+            loss_mmt_reg = torch.zeros(1, device=loss_bbox.device)
+        return loss_cls, loss_bbox, loss_mmt_reg                                                    # mmt
 
     def loss_by_feat(
             self,
             cls_scores: List[Tensor],
             bbox_preds: List[Tensor],
-            eng_preds: List[Tensor],                                                                # eng
+            mmt_reg_preds: List[Optional[Tensor]],                                                  # mmt
             batch_gt_instances: InstanceList,
             batch_img_metas: List[dict],
             batch_gt_instances_ignore: OptInstanceList = None) -> dict:
@@ -524,7 +618,7 @@ class HEPRetinaHead(AnchorHead):
             batch_img_metas,
             batch_gt_instances_ignore=batch_gt_instances_ignore)
         (labels_list, label_weights_list, bbox_targets_list, bbox_weights_list,
-         eng_targets_list, eng_weights_list,                                                        # eng
+         mmt_reg_targets_list, mmt_reg_weights_list,                                                # mmt
          avg_factor) = cls_reg_targets
 
         # anchor number of multi levels
@@ -536,20 +630,20 @@ class HEPRetinaHead(AnchorHead):
         all_anchor_list = images_to_levels(concat_anchor_list,
                                            num_level_anchors)
 
-        losses_cls, losses_bbox, losses_eng = multi_apply(                                          # eng
+        losses_cls, losses_bbox, losses_mmt_reg = multi_apply(                                      # mmt
             self.loss_by_feat_single,
             cls_scores,
             bbox_preds,
-            eng_preds,                                                                              # eng
+            mmt_reg_preds,                                                                          # mmt
             all_anchor_list,
             labels_list,
             label_weights_list,
             bbox_targets_list,
             bbox_weights_list,
-            eng_targets_list,                                                                       # eng
-            eng_weights_list,                                                                       # eng
+            mmt_reg_targets_list, mmt_reg_weights_list,                                             # mmt
             avg_factor=avg_factor)
-        return dict(loss_cls=losses_cls, loss_bbox=losses_bbox, loss_eng=losses_eng)                # eng
+        return dict(loss_cls=losses_cls, loss_bbox=losses_bbox, 
+                    loss_mmt_reg=losses_mmt_reg)                                                    # mmt
 
 
     # ##### ##### ##### ##### ##### ##### from base_dense_head.py ##### ##### ##### ##### ##### ##### #
@@ -573,8 +667,8 @@ class HEPRetinaHead(AnchorHead):
         for sampling_result in enumerate(sampling_results):
             pos_info = InstanceData()
             pos_info.bboxes = sampling_result.pos_gt_bboxes
-            pos_info.engs = sampling_result.pos_gt_engs                                             # eng
             pos_info.labels = sampling_result.pos_gt_labels
+            pos_info.mmt_regs = sampling_result.pos_gt_mmt_regs                                     # mmt
             pos_info.priors = sampling_result.pos_priors
             pos_info.pos_assigned_gt_inds = \
                 sampling_result.pos_assigned_gt_inds
@@ -602,7 +696,7 @@ class HEPRetinaHead(AnchorHead):
     def predict_by_feat(self,
                         cls_scores: List[Tensor],
                         bbox_preds: List[Tensor],
-                        eng_preds: List[Tensor],                                                    # eng
+                        mmt_reg_preds: List[Optional[Tensor]],                                      # mmt
                         score_factors: Optional[List[Tensor]] = None,
                         batch_img_metas: Optional[List[dict]] = None,
                         cfg: Optional[ConfigDict] = None,
@@ -647,7 +741,7 @@ class HEPRetinaHead(AnchorHead):
                   the last dimension 4 arrange as (x1, y1, x2, y2).
         """
         assert len(cls_scores) == len(bbox_preds)
-        assert len(cls_scores) == len(eng_preds)                                                    # eng
+        if self.use_mmt_reg: assert len(cls_scores) == len(mmt_reg_preds)                           # mmt
 
         if score_factors is None:
             # e.g. Retina, FreeAnchor, Foveabox, etc.
@@ -673,8 +767,12 @@ class HEPRetinaHead(AnchorHead):
                 cls_scores, img_id, detach=True)
             bbox_pred_list = select_single_mlvl(
                 bbox_preds, img_id, detach=True)
-            eng_pred_list = select_single_mlvl(                                                     # eng
-                eng_preds, img_id, detach=True)
+
+            if self.use_mmt_reg:                                                                    # mmt
+                mmt_reg_pred_list = select_single_mlvl(mmt_reg_preds, img_id, detach=True)
+            else:
+                mmt_reg_pred_list = [None, ] * len(bbox_pred_list)
+
             if with_score_factors:
                 score_factor_list = select_single_mlvl(
                     score_factors, img_id, detach=True)
@@ -684,7 +782,7 @@ class HEPRetinaHead(AnchorHead):
             results = self._predict_by_feat_single(
                 cls_score_list=cls_score_list,
                 bbox_pred_list=bbox_pred_list,
-                eng_pred_list=eng_pred_list,                                                        # eng
+                mmt_reg_pred_list=mmt_reg_pred_list,                                                # mmt
                 score_factor_list=score_factor_list,
                 mlvl_priors=mlvl_priors,
                 img_meta=img_meta,
@@ -697,7 +795,7 @@ class HEPRetinaHead(AnchorHead):
     def _predict_by_feat_single(self,
                                 cls_score_list: List[Tensor],
                                 bbox_pred_list: List[Tensor],
-                                eng_pred_list: List[Tensor],                                        # eng
+                                mmt_reg_pred_list: List[Optional[Tensor]],                          # mmt
                                 score_factor_list: List[Tensor],
                                 mlvl_priors: List[Tensor],
                                 img_meta: dict,
@@ -757,23 +855,30 @@ class HEPRetinaHead(AnchorHead):
 
         mlvl_bbox_preds = []
         mlvl_valid_priors = []
-        mlvl_eng_preds = []                                                                         # eng
+        mlvl_mmt_preds = []                                                                         # mmt
         mlvl_scores = []
         mlvl_labels = []
         if with_score_factors:
             mlvl_score_factors = []
         else:
             mlvl_score_factors = None
-        for level_idx, (cls_score, bbox_pred, eng_pred, score_factor, priors) in \
-                enumerate(zip(cls_score_list, bbox_pred_list, eng_pred_list,                        # eng
+        for level_idx, (cls_score, bbox_pred, mmt_reg_pred, score_factor, priors) in \
+                enumerate(zip(cls_score_list, bbox_pred_list, 
+                              mmt_reg_pred_list,                                                    # mmt
                               score_factor_list, mlvl_priors)):
 
             assert cls_score.size()[-2:] == bbox_pred.size()[-2:]
-            assert cls_score.size()[-2:] == eng_pred.size()[-2:]                                    # eng
+            if self.use_mmt_reg: assert cls_score.size()[-2:] == mmt_reg_pred.size()[-2:]           # mmt
 
             dim = self.bbox_coder.encode_size
             bbox_pred = bbox_pred.permute(1, 2, 0).reshape(-1, dim)
-            eng_pred = eng_pred.permute(1, 2, 0).reshape(-1, 1)                                     # eng
+
+            if self.use_mmt_reg:                                                                    # mmt
+                mmt_reg_pred = mmt_reg_pred.permute(1, 2, 0).reshape(-1, 1)
+                mmt_pred = self.mmt_decode(mmt_reg_pred)
+            else:
+                mmt_pred = torch.zeros((len(bbox_pred), 1), device=bbox_pred.device)
+
             if with_score_factors:
                 score_factor = score_factor.permute(1, 2,
                                                     0).reshape(-1).sigmoid()
@@ -801,14 +906,14 @@ class HEPRetinaHead(AnchorHead):
 
             bbox_pred = filtered_results['bbox_pred']
             priors = filtered_results['priors']
-            eng_pred = eng_pred[keep_idxs]                                                          # eng
+            mmt_pred = mmt_pred[keep_idxs]                                                          # mmt
 
             if with_score_factors:
                 score_factor = score_factor[keep_idxs]
 
             mlvl_bbox_preds.append(bbox_pred)
             mlvl_valid_priors.append(priors)
-            mlvl_eng_preds.append(eng_pred)                                                         # eng
+            mlvl_mmt_preds.append(mmt_pred)                                                         # mmt
             mlvl_scores.append(scores)
             mlvl_labels.append(labels)
 
@@ -819,12 +924,11 @@ class HEPRetinaHead(AnchorHead):
         priors = cat_boxes(mlvl_valid_priors)
         bboxes = self.bbox_coder.decode(priors, bbox_pred, max_shape=img_shape)
 
-        eng_pred = torch.cat(mlvl_eng_preds)                                                        # eng
-        engs = self.eng_decode(eng_pred)                                                            # eng
+        mmts = torch.cat(mlvl_mmt_preds)                                                            # mmt
 
         results = InstanceData()
         results.bboxes = bboxes
-        results.engs = engs                                                                         # eng
+        results.mmts = mmts                                                                         # mmt
         results.scores = torch.cat(mlvl_scores)
         results.labels = torch.cat(mlvl_labels)
         if with_score_factors:

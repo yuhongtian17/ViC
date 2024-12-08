@@ -22,7 +22,7 @@ from .transforms import (Albu, CachedMixUp, CachedMosaic, CopyPaste, CutOut,
                          SegRescale, YOLOXHSVRandomAug)
 from .wrappers import MultiBranch, ProposalBroadcaster, RandomOrder
 
-from .hep2coco_loading import LoadImageFromHEPeng, LoadHEPAnnotations, PackHEPDetInputs
+from .hep2coco_loading import LoadImageFromHEPeng, HEPLoadAnnotations, HEPPackDetInputs
 
 __all__ = [
     'PackDetInputs', 'ToTensor', 'ImageToTensor', 'Transpose',
@@ -41,5 +41,5 @@ __all__ = [
     'LoadTrackAnnotations', 'BaseFrameSample', 'UniformRefFrameSample',
     'PackTrackInputs', 'PackReIDInputs', 'FixScaleResize', 'ResizeShortestEdge',
 
-    'LoadImageFromHEPeng', 'LoadHEPAnnotations', 'PackHEPDetInputs',
+    'LoadImageFromHEPeng', 'HEPLoadAnnotations', 'HEPPackDetInputs',
 ]
