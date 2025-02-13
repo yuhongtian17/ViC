@@ -1,0 +1,86 @@
+pretrained = 'data/pretrained/vheat_tiny_512.pth'
+
+# model settings
+model = dict(
+    type='HEPRetinaNet',
+    data_preprocessor=dict(
+        type='DetDataPreprocessor',
+        mean=[123.675, 116.28, 103.53],
+        std=[58.395, 57.12, 57.375],
+        bgr_to_rgb=True,
+        pad_size_divisor=32),
+    backbone=dict(
+        type='MMDET_VHEAT',
+        feat_fusion_mode='cat',
+        drop_path_rate=0.1,
+        post_norm=False,
+        depths=(2, 2, 6, 2),
+        dims=96,
+        out_indices=(1, 2, 3),
+        img_size=512,
+        pretrained=pretrained,
+        use_checkpoint=True),
+    neck=dict(
+        type='FPN',
+        in_channels=[192, 384, 768], # [256, 512, 1024, 2048],
+        out_channels=256,
+        start_level=0, # 1,
+        add_extra_convs='on_input',
+        num_outs=5),
+    bbox_head=dict(
+        type='HEPRetinaHead',
+        num_classes=2, # 80,
+        in_channels=256,
+        stacked_convs=4,
+        feat_channels=256,
+        anchor_generator=dict(
+            type='AnchorGenerator',
+            octave_base_scale=4,
+            scales_per_octave=3,
+            ratios=[0.5, 1.0, 2.0],
+            strides=[8, 16, 32, 64, 128]),
+        bbox_coder=dict(
+            type='DeltaXYWHBBoxCoder',
+            target_means=[.0, .0, .0, .0],
+            target_stds=[1.0, 1.0, 1.0, 1.0]),
+        loss_cls=dict(
+            type='FocalLoss',
+            use_sigmoid=True,
+            gamma=2.0,
+            alpha=0.25,
+            loss_weight=1.0),
+        loss_bbox=dict(type='L1Loss', loss_weight=1.0),
+        # mmt
+        mmt_base=1.0,
+        mmt_mean=0.0,
+        mmt_std=1.0,
+        loss_mmt_reg=dict(type='L1Loss', loss_weight=1.0),
+        mmt_use_fpn=False,
+        mmt_use_gloattn=True,
+        mmt_in_channels=768,
+        hw_shape=[15, 30],
+        block_type='HeatKBlock',
+        drop_path=0.1,
+        stacked_blocks=2,
+        feat_fusion_mode='cat',
+        with_cp=True),
+    # model training and testing settings
+    train_cfg=dict(
+        assigner=dict(
+            type='MaxIoUAssigner',
+            pos_iou_thr=0.5,
+            neg_iou_thr=0.4,
+            min_pos_iou=0,
+            ignore_iof_thr=-1),
+        sampler=dict(
+            # type='PseudoSampler'),  # Focal loss should use PseudoSampler
+            type='HEPPseudoSampler'),
+        allowed_border=-1,
+        pos_weight=-1,
+        debug=False),
+    test_cfg=dict(
+        nms_pre=1000,
+        min_bbox_size=0,
+        score_thr=0.00, # 0.05,
+        nms=dict(type='nms', iou_threshold=0.5),
+        max_per_img=1)) # 100))
