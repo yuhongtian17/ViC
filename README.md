@@ -1,5 +1,9 @@
 # Vision Calorimeter
 
+<p align="left">
+<a href="https://arxiv.org/abs/2408.10599"><img src="https://img.shields.io/badge/arXiv-Paper-<color>"></a>
+</p>
+
 ## Abstract
 
 <div align=center><img src="./figures/figure_1_v12.png"></div>
@@ -12,6 +16,8 @@ HCO enjoys the advantage of both radial prior and global attention, as it is ins
 Implemented via the Discrete Cosine Transform (DCT), HCO extracts frequency-domain features, bridging the distribution gap between the particle images and the natural images on which visual object detectors are pre-trained.
 Experimental results demonstrate that ViC significantly outperforms traditional approaches, reducing the incident position prediction error by 46.16\% (from $17.31^{\circ}$ to $9.32^{\circ}$) and providing the first baseline result with an incident momentum regression error of 21.48\%.
 This study underscores ViC's great potential as a general-purpose particle parameter estimator in high-energy physics. Code is available at https://github.com/yuhongtian17/ViC.
+
+Full paper is available at https://arxiv.org/abs/2408.10599.
 
 ## Dataset
 
@@ -121,6 +127,17 @@ sudo apt update
 sudo apt install libgl1-mesa-glx
 ```
 
+## Citation
+
+```
+@article{vic,
+  title={Vision Calorimeter: Migrating Visual Object Detector to High-energy Particle Images},
+  author={Yu, Hongtian and Li, Yangu and Liu, Yunfan and Song, Yunxuan and Lyu, Xiaorui and Ye, Qixiang},
+  journal={arXiv preprint arXiv:2408.10599},
+  year={2024}
+}
+```
+
 ## License
 
 ViC is released under the [License](LICENSE).
@@ -165,6 +182,7 @@ pip install mmengine==0.10.5
 # ref: https://mmcv.readthedocs.io/zh-cn/v2.0.1/get_started/build.html#npu-mmcv
 wget https://github.com/open-mmlab/mmcv/archive/refs/heads/main.zip -O mmcv-2.2.x.zip
 unzip mmcv-2.2.x.zip
+mv mmcv-main mmcv-2.2.x
 cd mmcv-2.2.x/
 MMCV_WITH_OPS=1 MAX_JOBS=8 FORCE_NPU=1 python setup.py build_ext
 MMCV_WITH_OPS=1 FORCE_NPU=1 python setup.py develop
@@ -172,6 +190,7 @@ cd ../
 
 wget https://github.com/open-mmlab/mmpretrain/archive/refs/heads/main.zip -O mmpretrain-1.2.x.zip
 unzip mmpretrain-1.2.x.zip
+mv mmpretrain-main mmpretrain-1.2.x
 cd mmpretrain-1.2.x/
 pip install -v -e .
 cd ../
