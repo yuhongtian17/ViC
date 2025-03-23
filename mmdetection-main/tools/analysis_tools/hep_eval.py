@@ -1,13 +1,14 @@
-# python ./tools/analysis_tools/hep_eval.py --pkl "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/results_ep12.pkl" --json "./data/HEP2COCO/bbox_scale_10/Nm_1m__b00000001__e00100000.json" --need_plot 0 --need_excel 0 --need_visual 0
+# python ./tools/analysis_tools/hep_eval.py --pkl_path "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/results_ep12.pkl" --json_path "./data/HEP2COCO/bbox_scale_10/Nm_1m__b00000001__e00100000.json" --need_plot 0 --need_excel 0 --need_visual 0
 
 import os
 import argparse
+# from pycocotools.coco import COCO
+import json
 import pickle
 import datetime
 from tqdm import tqdm
 
 import numpy as np
-from pycocotools.coco import COCO
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -26,8 +27,8 @@ class HEP_eval(object):
     转化为高能方式的评估
     """
     def __init__(self, 
-                 pkl: str, 
-                 json: str, 
+                 pkl_path: str, 
+                 json_path: str, 
                  # 
                  num_classes: int = 2, 
                  ber_thr: float = 0.0, 
@@ -42,8 +43,8 @@ class HEP_eval(object):
                  visual_gt_ignore: bool = False, 
                  visual_pred_ignore: bool = False, 
                  ):
-        self.pkl = pkl
-        self.json = json
+        self.pkl_path = pkl_path
+        self.json_path = json_path
         # 
         self.num_classes = num_classes
         self.ber_thr = ber_thr
@@ -58,16 +59,54 @@ class HEP_eval(object):
         self.visual_gt_ignore = visual_gt_ignore
         self.visual_pred_ignore = visual_pred_ignore
 
-        self.ann_coco = COCO(self.json)                                         # 读取json文件
-        self.ann_coco_imgids = self.ann_coco.getImgIds()                        # 读取json文件的imgids列表
-        self.ann_coco_annids = self.ann_coco.getAnnIds()                        # 读取json文件的annids列表
+        if self.json_path[-5:] == '.json':
+            print("Now loading json ...")
+            json_t1 = datetime.datetime.now()
 
-        t1 = datetime.datetime.now()
+            self.ann_coco = json.load(open(self.json_path, 'r'))                # json.load()
 
-        self.result_all = pickle.load(open(self.pkl, 'rb'))                     # 读取pkl文件
+            json_t2 = datetime.datetime.now()
+            print("[json]   : open \"{}\" successfully! time: {}".format(
+                self.json_path, json_t2 - json_t1))
 
-        t2 = datetime.datetime.now()
-        print("[pickle] : open file successfully! time: {}".format(t2 - t1))
+        else:
+            jsons_raw = os.listdir(self.json_path)
+            jsons = []
+            for temp in jsons_raw:
+                if temp[-5:] == '.json': jsons.append(temp)
+            jsons.sort()
+
+            data_dict = {}
+            data_dict['images'] = []
+            data_dict['annotations'] = []
+
+            for temp in jsons:
+                print("Now loading json ...")
+                json_t1 = datetime.datetime.now()
+
+                json_path_temp = os.path.join(self.json_path, temp)
+                ann_coco_temp = json.load(open(json_path_temp, 'r'))            # json.load()
+
+                json_t2 = datetime.datetime.now()
+                print("[json]   : open \"{}\" successfully! time: {}".format(
+                    json_path_temp, json_t2 - json_t1))
+
+                data_dict['images'] += ann_coco_temp['images']
+                data_dict['annotations'] += ann_coco_temp['annotations']
+            self.ann_coco = data_dict
+
+        # self.ann_coco = COCO(self.json)                                         # 读取json文件
+        # self.ann_coco_imgids = self.ann_coco.getImgIds()                        # 读取json文件的imgids列表
+        # self.ann_coco_annids = self.ann_coco.getAnnIds()                        # 读取json文件的annids列表
+
+        print("Now loading pickle ...")
+        pickle_t1 = datetime.datetime.now()
+
+        self.result_all = pickle.load(open(self.pkl_path, 'rb'))                # 读取pkl文件
+
+        pickle_t2 = datetime.datetime.now()
+        print("[pickle] : open \"{}\" successfully! time: {}".format(
+            self.pkl_path, pickle_t2 - pickle_t1))
 
         self.eps = 1e-6
 
@@ -92,16 +131,14 @@ class HEP_eval(object):
         sheet = book.active                                                     # 选择或创建一个工作表
         sheet_font = Font(name='Dengxian', size=11, bold=False, italic=False)   # 我们的默认字体
         sheet_col  = ['A', 'B', 'C', 
-                      'D', 'E', 'F', 
-                      'G', 'H', 'I', 'J', 'K', 'L', 
-                      'M', 
-                      'N', 'O', 
-                      'P', 'Q', 'R', 
-                      'S', 'T', 'U', 'V', 
-                      'W']
+                      'D', 'E', 'F', 'G', 'H', 
+                      'I', 
+                      'J', 'K', 
+                      'L', 'M', 'N', 
+                      'O', 'P', 'Q', 'R', 
+                      'S']
         sheet_head = ['runid', 'evtid', 'image_id', 
-                      'category_id', 'phi_RM', 'the_RM', 
-                      'px_RM', 'py_RM', 'pz_RM', 'E_RM', 'p_RM', 'ber', 
+                      'category_id', 'phi_RM', 'the_RM', 'p_RM', 'ber', 
                       'pred_score', 
                       'pred_label', 'flag {0, 1}', 
                       'pred_phi [-pi, pi)', 'pred_the [0, pi)', 'angular_bias [0, 180]', 
@@ -116,11 +153,12 @@ class HEP_eval(object):
 
         for result_per_event in tqdm(self.result_all):
             image_h, image_w = result_per_event["img_shape"]
+            image_id = result_per_event["img_id"]
             pred_scores = result_per_event["pred_instances"]["scores"]          # 以下均已按scores降序排列！
             pred_labels = result_per_event["pred_instances"]["labels"]
             pred_bboxes = result_per_event["pred_instances"]["bboxes"]
             # pred_mmts   = result_per_event["pred_instances"]["mmts"]
-            pred_mmts   = result_per_event["pred_instances"].get("mmts", [0.0] * len(pred_bboxes))
+            pred_mmts   = result_per_event["pred_instances"].get("mmts", [[0.0]] * len(pred_bboxes))
 
             if len(pred_bboxes) == 0:
                 pred_score = self.eps
@@ -136,28 +174,32 @@ class HEP_eval(object):
                 pred_y_ctr = (pred_bbox[1] + pred_bbox[3]) * 0.5
                 pred_phi = float(pred_x_ctr / image_w * 2 * np.pi - np.pi)      # phi: [-pi, pi)
                 pred_the = float(pred_y_ctr / image_h * np.pi)                  # the: [0, pi)
-                pred_mmt = float(pred_mmts[0])                                  # 注意必须强制类型转换，否则写入excel会报错
+                pred_mmt_raw = pred_mmts[0]
+                pred_mmt = float(pred_mmt_raw[0])
 
-            image_id = self.ann_coco_imgids[event_i]                            # pkl文件与json文件的图片顺序一致
-            single_image = self.ann_coco.loadImgs(ids=image_id)[0]              # loadImgs()返回一个list。只需要1张图片
-            ann_id = self.ann_coco.getAnnIds(imgIds=image_id)[0]                # getAnnIds()返回一个list。每张图片只需要1个gt
-            single_gt = self.ann_coco.loadAnns(ids=ann_id)[0]                   # loadAnns()返回一个list。每张图片只需要1个gt
+            # image_id = self.ann_coco_imgids[event_i]                            # pkl文件与json文件的图片顺序一致
+            # single_image = self.ann_coco.loadImgs(ids=image_id)[0]              # loadImgs()返回一个list。只需要1张图片
+            # ann_id = self.ann_coco.getAnnIds(imgIds=image_id)[0]                # getAnnIds()返回一个list。每张图片只需要1个gt
+            # single_gt = self.ann_coco.loadAnns(ids=ann_id)[0]                   # loadAnns()返回一个list。每张图片只需要1个gt
+
+            single_image = self.ann_coco['images'][event_i]
+            single_gt = self.ann_coco['annotations'][event_i]
 
             image_runid = int(single_image['runid'])
             image_evtid = int(single_image["evtid"])
-            # image_id    = int(single_image['id'])
+            assert image_id == int(single_image['id'])
 
             gt_category = int(single_gt['category_id'])
             gt_phi      = float(single_gt["phi_RM"])
             gt_the      = float(single_gt["the_RM"])
-            gt_px       = float(single_gt["px_RM"])
-            gt_py       = float(single_gt['py_RM'])
-            gt_pz       = float(single_gt['pz_RM'])
-            gt_eng      = float(single_gt['E_RM'])
             gt_mmt      = float(single_gt['p_RM'])
             gt_ber      = float(single_gt['ber'])
+            assert image_id == int(single_gt['image_id'])
 
             event_i += 1
+
+            if gt_category > self.num_classes:                                  # e.g. ignore Np or Lmdp
+                continue
 
             if self.ber_thr > 0 and self.ber_thr > gt_ber:                      # e.g. ignore 0.4 if ber_thr=+0.5
                 continue
@@ -214,8 +256,7 @@ class HEP_eval(object):
                 pred_ber = float(bbox_eng / total_eng)
 
             row = [image_runid, image_evtid, image_id, 
-                   gt_category, gt_phi, gt_the, 
-                   gt_px, gt_py, gt_pz, gt_eng, gt_mmt, gt_ber, 
+                   gt_category, gt_phi, gt_the, gt_mmt, gt_ber, 
                    pred_score, 
                    pred_label, flag, 
                    pred_phi, pred_the, angular_bias, 
@@ -427,19 +468,16 @@ class HEP_eval(object):
             else:
                 image_id_list = str_to_numbers(input_str, dtype=int)
 
-            for iid in tqdm(image_id_list):
-                ind = iid - 1
+            for image_id in tqdm(image_id_list):
+                ind = image_id - 1
                 single_pred = None if self.visual_pred_ignore else self.result_all[ind]
 
-                image_id = self.ann_coco_imgids[ind]
-                single_image = self.ann_coco.loadImgs(ids=image_id)[0]
-
-                ann_id = self.ann_coco.getAnnIds(imgIds=image_id)
-                gts = None if self.visual_gt_ignore else self.ann_coco.loadAnns(ids=ann_id)
+                single_image = self.ann_coco['images'][ind]
+                single_gt = self.ann_coco['annotations'][ind]
 
                 visualization(
                     single_image = single_image, 
-                    gts = gts, 
+                    single_gt = single_gt, 
                     single_pred = single_pred, 
                     output_dir = self.output_dir, 
                     with_hint = False, 
@@ -455,8 +493,8 @@ class HEP_eval(object):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--pkl", type = str, default = "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/results_ep12.pkl", help = "pkl file")
-    parser.add_argument("--json", type = str, default = "./data/HEP2COCO/bbox_scale_10/Nm_1m__b00000001__e00100000.json", help = "json file")  # 目前仅支持单一文件输入
+    parser.add_argument("--pkl_path", type = str, default = "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/results_ep12.pkl", help = "pkl path")
+    parser.add_argument("--json_path", type = str, default = "./data/HEP2COCO/bbox_scale_10/Nm_1m__b00000001__e00100000.json", help = "json path")
     # 
     parser.add_argument("--num_classes", type = int, default = 2, help = "number of classes")
     parser.add_argument("--ber_thr", type = float, default = 0.0, help = "bbox energy ratio threshold")
@@ -473,8 +511,8 @@ if __name__ == '__main__':
     opt = parser.parse_args()
 
     HEP_eval(
-        pkl = opt.pkl, 
-        json = opt.json, 
+        pkl_path = opt.pkl_path, 
+        json_path = opt.json_path, 
         # 
         num_classes = opt.num_classes, 
         ber_thr = opt.ber_thr, 

@@ -3,8 +3,9 @@
 # 
 # Others:
 # python ./tools/dataset_converters/root_to_json.py --easy_scale -1 --scales 80
-# python ./tools/dataset_converters/root_to_json.py --srcroot "./data/BESIII_training_sample/Lmdm_1m.root" --fn_prefix "Lmdm_1m" --split_size 80000
 # python ./tools/dataset_converters/root_to_json.py --srcroot "./data/BESIII_training_sample/Nm_1m.root" --fn_prefix "Nm_1m" --split_size 100000
+# python ./tools/dataset_converters/root_to_json.py --srcroot "./data/BESIII_training_sample/Lmdm_1m.root" --fn_prefix "Lmdm_1m" --split_size 80000
+# python ./tools/dataset_converters/root_to_json.py --srcroot "./data/BESIII_training_sample/LmdLmd_with_pi0.root" --destroot "./data/HEP2COCO/" --df_prefix "Nm_lmdlmd_pi0" --fn_prefix "Nm_lmdlmd_pi0"
 # python ./tools/dataset_converters/root_to_json.py --srcroot "./data/Neutron_sample_full/" --fn_prefix "Nm_fullana"
 
 import os
@@ -46,7 +47,7 @@ def strides_and_ratios_to_wh(strides, ratios):
 def root_to_json(
     srcroot: str,
     destroot: str,
-    df_prefix: str = "bbox_scale",
+    df_prefix: str = "",
     fn_prefix: str = "Nm_1m",
     split_size: int = 100000,
     width: int = 960,
@@ -76,16 +77,20 @@ def root_to_json(
     print("num_srcfiles:", num_srcfiles)
 
     # json文件的文件夹名
-    df_suffix = ""
-    if easy_scale > 0.0:
-        df_suffix += ('_' + str(int(easy_scale)))
+    if len(df_prefix) > 0:
+        destfolder = os.path.join(destroot, df_prefix)
+
+    elif easy_scale > 0.0:
+        destfolder = os.path.join(destroot, 'bbox_scale_{}'.format(int(easy_scale)))
+
     else:
         _strides = str_to_numbers(strides, [1.0])
         _ratios = str_to_numbers(ratios, [1.0])
         _scales = str_to_numbers(scales, [80.0])
         _wh = strides_and_ratios_to_wh(_strides, _ratios)
+        df_suffix = "bbox_scale"
         for single_scale in _scales: df_suffix += ('_' + str(int(single_scale)))
-    destfolder = os.path.join(destroot, df_prefix + df_suffix)
+        destfolder = os.path.join(destroot, df_suffix)
 
     if not os.path.exists(destfolder):
         os.makedirs(destfolder)
@@ -153,7 +158,7 @@ def root_to_json(
         evtid_array = data['evtid']
         flag_cc_array = data['flag_cc']
         flag_SB_array = data['flag_SB']
-        p4_RM_array = data['p4_RM']
+        # p4_RM_array = data['p4_RM']
         p_RM_array = data['p_RM']
         phi_RM_array = data['phi_RM']
         the_RM_array = data['the_RM']
@@ -172,7 +177,7 @@ def root_to_json(
         assert num_events == len(evtid_array)
         assert num_events == len(flag_cc_array)
         assert num_events == len(flag_SB_array)
-        assert num_events == len(p4_RM_array)
+        # assert num_events == len(p4_RM_array)
         assert num_events == len(p_RM_array)
         assert num_events == len(phi_RM_array)
         assert num_events == len(the_RM_array)
@@ -194,10 +199,10 @@ def root_to_json(
             evtid_i = int(evtid_array[event_i])
             flag_cc_i = int(flag_cc_array[event_i])
             flag_SB_i = int(flag_SB_array[event_i])
-            px_RM_i = float(p4_RM_array[event_i].member('fP').member('fX'))
-            py_RM_i = float(p4_RM_array[event_i].member('fP').member('fY'))
-            pz_RM_i = float(p4_RM_array[event_i].member('fP').member('fZ'))
-            E_RM_i = float(p4_RM_array[event_i].member('fE'))
+            # px_RM_i = float(p4_RM_array[event_i].member('fP').member('fX'))
+            # py_RM_i = float(p4_RM_array[event_i].member('fP').member('fY'))
+            # pz_RM_i = float(p4_RM_array[event_i].member('fP').member('fZ'))
+            # E_RM_i = float(p4_RM_array[event_i].member('fE'))
             p_RM_i = float(p_RM_array[event_i])
             phi_RM_i = float(phi_RM_array[event_i])
             the_RM_i = float(the_RM_array[event_i])
@@ -266,10 +271,10 @@ def root_to_json(
                 single_obj['bbox'] = xmin_ex, ymin_ex, w_ex, h_ex
                 single_obj['image_id'] = image_i
                 single_obj['id'] = ann_i
-                single_obj['px_RM'] = px_RM_i
-                single_obj['py_RM'] = py_RM_i
-                single_obj['pz_RM'] = pz_RM_i
-                single_obj['E_RM'] = E_RM_i
+                # single_obj['px_RM'] = px_RM_i
+                # single_obj['py_RM'] = py_RM_i
+                # single_obj['pz_RM'] = pz_RM_i
+                # single_obj['E_RM'] = E_RM_i
                 single_obj['p_RM'] = p_RM_i
                 single_obj['phi_RM'] = phi_RM_i
                 single_obj['the_RM'] = the_RM_i
@@ -312,10 +317,10 @@ def root_to_json(
                         single_obj['bbox'] = xmin_ex, ymin_ex, w_ex, h_ex
                         single_obj['image_id'] = image_i
                         single_obj['id'] = ann_i
-                        single_obj['px_RM'] = px_RM_i
-                        single_obj['py_RM'] = py_RM_i
-                        single_obj['pz_RM'] = pz_RM_i
-                        single_obj['E_RM'] = E_RM_i
+                        # single_obj['px_RM'] = px_RM_i
+                        # single_obj['py_RM'] = py_RM_i
+                        # single_obj['pz_RM'] = pz_RM_i
+                        # single_obj['E_RM'] = E_RM_i
                         single_obj['p_RM'] = p_RM_i
                         single_obj['phi_RM'] = phi_RM_i
                         single_obj['the_RM'] = the_RM_i
@@ -357,7 +362,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--srcroot", type = str, default = "./data/BESIII_training_sample/Nm_1m.root", help = "srcroot")
     parser.add_argument("--destroot", type = str, default = "./data/HEP2COCO/", help = "destroot")
-    parser.add_argument("--df_prefix", type = str, default = "bbox_scale", help = "destfolder prefix")
+    parser.add_argument("--df_prefix", type = str, default = "", help = "destfolder prefix")
     parser.add_argument("--fn_prefix", type = str, default = "Nm_1m", help = "filename prefix")
     parser.add_argument("--split_size", type = int, default = 100000, help = "split size")
     parser.add_argument("--width", type = int, default = 960, help = "width")
