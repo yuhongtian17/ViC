@@ -53,13 +53,11 @@ class LoadImageFromHEPeng(LoadImageFromFile):
     def __init__(self,
                  # https://github.com/open-mmlab/mmcv/blob/main/mmcv/transforms/loading.py
                  to_float32: bool = True,
-                 with_time: int = 0,
                  bg_version: Optional[str] = None,
                  snr_db: float = 10.0,
                  **kwargs) -> None:
         super().__init__(to_float32=to_float32, **kwargs)
 
-        self.with_time = with_time
         self.bg_version = bg_version
         self.snr_db = snr_db
 
@@ -77,7 +75,6 @@ class LoadImageFromHEPeng(LoadImageFromFile):
         # img = results['img']
         img = load_rgb(
             single_image = results,
-            with_time = self.with_time,
             bg_version = self.bg_version,
             snr_db = self.snr_db,
         )

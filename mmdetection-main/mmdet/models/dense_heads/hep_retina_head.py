@@ -67,6 +67,7 @@ from ..utils import (images_to_levels, multi_apply, unmap,
 from .anchor_head import AnchorHead
 
 
+import os
 import torch.nn.functional as F
 import torch.utils.checkpoint as cp
 from mmcv.cnn import build_norm_layer
@@ -278,10 +279,15 @@ class HEPRetinaHead(AnchorHead):
                  mmt_use_gloattn=True,
                  mmt_in_channels=768,
                  hw_shape=[15, 30],
-                 block_type='HeatKBlock',
-                 drop_path=0.1,
                  stacked_blocks=2,
+                 block_type='HeatKBlock',
                  feat_fusion_mode='cat',
+                 drop_path=0.1,
+                 mlp_ratio=4.0,
+                 post_norm=False,
+                 layer_scale=None,
+                 # pretrained=None,
+                 # pretrained_src=None,
                  with_cp=True,
                  **kwargs):
         assert stacked_convs >= 0, \
@@ -300,10 +306,15 @@ class HEPRetinaHead(AnchorHead):
         self.mmt_use_gloattn = mmt_use_gloattn
         self.mmt_in_channels = mmt_in_channels
         self.hw_shape = hw_shape
-        self.block_type = block_type if isinstance(block_type, str) else ''
-        self.drop_path = drop_path
         self.stacked_blocks = stacked_blocks
+        self.block_type = block_type if isinstance(block_type, str) else ''
         self.feat_fusion_mode = feat_fusion_mode
+        self.mlp_ratio = mlp_ratio
+        self.drop_path = drop_path
+        self.post_norm = post_norm
+        self.layer_scale = layer_scale
+        # self.pretrained = pretrained
+        # self.pretrained_src = pretrained_src
         self.with_cp = with_cp
 
         self.mmt_reg_channels = 1
@@ -315,7 +326,56 @@ class HEPRetinaHead(AnchorHead):
             init_cfg=init_cfg,
             **kwargs)
 
-        if self.use_mmt_reg: self.loss_mmt_reg = MODELS.build(loss_mmt_reg)                         # mmt
+        if self.use_mmt_reg:                                                                        # mmt
+            self.loss_mmt_reg = MODELS.build(loss_mmt_reg)
+
+    # def load_pretrained(self, ckpt=""):
+    #     _ckpt = torch.load(open(ckpt, "rb"), map_location=torch.device("cpu"))
+    #     print(f"Successfully load ckpt {ckpt}")
+
+    #     if self.pretrained_src == 'simmim':
+    #         freq_embed_name = 'neck.freq_embed'
+    #         weight_name_prefix = 'neck.blocks.'
+    #         len_prefix = len(weight_name_prefix)
+
+    #         pretrained_freq_embed = _ckpt['model'][freq_embed_name]
+    #         if pretrained_freq_embed.shape[:2] != self.freq_embed.shape[:2]:
+    #             resized_freq_embed = pretrained_freq_embed.permute(2, 0, 1).contiguous().unsqueeze(0)
+    #             resized_freq_embed = F.interpolate(
+    #                 resized_freq_embed, size=(self.freq_embed.shape[0], self.freq_embed.shape[1]), mode='bicubic'
+    #             ).squeeze().permute(1, 2, 0).contiguous()
+    #         else:
+    #             resized_freq_embed = pretrained_freq_embed
+    #         print('freq_embed: {} -> {}'.format(pretrained_freq_embed.shape, resized_freq_embed.shape))
+
+    #         self.freq_embed.data.copy_(resized_freq_embed.to(self.freq_embed.device))
+    #         print('self.freq_embed: device: {}, requires_grad: {}'.format(self.freq_embed.device, self.freq_embed.requires_grad))
+
+    #         new_weights = {}
+    #         weights_keys = list(_ckpt['model'].keys())
+    #         for k in range(self.stacked_blocks):
+    #             for weight_name in weights_keys:
+    #                 if weight_name[:len_prefix] == weight_name_prefix:
+    #                     new_weights[weight_name[len_prefix:]] = _ckpt['model'][weight_name]
+    #                     print('{} -> {}'.format(weight_name, weight_name[len_prefix:]))
+
+    #     elif self.pretrained_src == 'backbone':
+    #         weight_name_prefix = 'layers.3.1'
+    #         len_prefix = len(weight_name_prefix)
+
+    #         new_weights = {}
+    #         weights_keys = list(_ckpt['model'].keys())
+    #         for k in range(self.stacked_blocks):
+    #             for weight_name in weights_keys:
+    #                 if weight_name[:len_prefix] == weight_name_prefix:
+    #                     new_weights[str(k) + weight_name[len_prefix:]] = _ckpt['model'][weight_name]
+    #                     print('{} -> {}'.format(weight_name, str(k) + weight_name[len_prefix:]))
+
+    #     else:
+    #         new_weights = {}
+
+    #     incompatibleKeys = self.mmt_reg_blocks.load_state_dict(new_weights, strict=False)
+    #     print(incompatibleKeys)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Conv2d):
@@ -405,6 +465,7 @@ class HEPRetinaHead(AnchorHead):
                         AttnBlock(
                             dim=mmt_in_channels,
                             num_heads=mmt_in_channels // 32,
+                            mlp_ratio=self.mlp_ratio,
                             drop_path=self.drop_path,
                             with_cp=self.with_cp,
                         ))
@@ -421,9 +482,9 @@ class HEPRetinaHead(AnchorHead):
                             drop_path=self.drop_path,
                             norm_layer=LayerNorm2d,
                             use_checkpoint=self.with_cp,
-                            mlp_ratio=4.0,
-                            post_norm=False,
-                            layer_scale=None,
+                            mlp_ratio=self.mlp_ratio,
+                            post_norm=self.post_norm,
+                            layer_scale=self.layer_scale,
                             infer_mode=False,
                         ))
                 self.mmt_reg_blocks.append(LayerNorm2d_ex(
@@ -438,9 +499,9 @@ class HEPRetinaHead(AnchorHead):
                             drop_path=self.drop_path,
                             norm_layer=LayerNorm2d,
                             use_checkpoint=self.with_cp,
-                            mlp_ratio=4.0,
-                            post_norm=False,
-                            layer_scale=None,
+                            mlp_ratio=self.mlp_ratio,
+                            post_norm=self.post_norm,
+                            layer_scale=self.layer_scale,
                             infer_mode=False,
                             feat_fusion_mode=self.feat_fusion_mode,
                         ))
@@ -465,6 +526,10 @@ class HEPRetinaHead(AnchorHead):
             )
 
             self.apply(self._init_weights)
+
+            # if 'Heat' in self.block_type and self.stacked_blocks > 0 and self.pretrained is not None:
+            #     assert os.path.exists(self.pretrained)
+            #     self.load_pretrained(self.pretrained)
 
     def forward_single(self, x):
         """Forward feature of a single scale level.
@@ -506,6 +571,16 @@ class HEPRetinaHead(AnchorHead):
 
         if self.use_mmt_reg and self.mmt_use_gloattn:
             mmt_reg_feat = backbone_feat
+
+            # if self.freq_embed is None:
+            #     resized_freq_embed = self.freq_embed
+            # elif self.freq_embed.shape[:2] != mmt_reg_feat.shape[2:]:
+            #     resized_freq_embed = self.freq_embed.permute(2, 0, 1).contiguous().unsqueeze(0)
+            #     resized_freq_embed = F.interpolate(
+            #         resized_freq_embed, size=(mmt_reg_feat.shape[2], mmt_reg_feat.shape[3]), mode='bicubic'
+            #     ).squeeze().permute(1, 2, 0).contiguous()
+            # else:
+            #     resized_freq_embed = self.freq_embed
 
             for block in self.mmt_reg_blocks:
                 if 'Heat' in block.__class__.__name__:
@@ -631,8 +706,7 @@ class HEPRetinaHead(AnchorHead):
 
             if self.use_mmt_reg:                                                                    # mmt
                 # 由于loss_mmt_reg无法使用`IouLoss`, `GIouLoss`等损失函数，因此必须对gt预编码而非对pred预解码！
-                pos_mmt_reg_targets = self.mmt_encode(sampling_result.pos_gt_mmt_regs)
-                mmt_reg_targets[pos_inds, :] = pos_mmt_reg_targets
+                mmt_reg_targets[pos_inds, :] = self.mmt_encode(sampling_result.pos_gt_mmt_regs)
                 mmt_reg_weights[pos_inds, :] = 1.0
 
             labels[pos_inds] = sampling_result.pos_gt_labels
@@ -1146,7 +1220,7 @@ class HEPRetinaHead(AnchorHead):
             if self.use_mmt_reg:                                                                    # mmt
                 mmt_reg_pred = mmt_reg_pred.permute(1, 2, 0).reshape(-1, self.mmt_reg_channels)
             else:
-                mmt_reg_pred = torch.zeros((len(bbox_pred), 1), device=bbox_pred.device)
+                mmt_reg_pred = torch.zeros((len(bbox_pred), self.mmt_reg_channels), device=bbox_pred.device)
 
             if with_score_factors:
                 score_factor = score_factor.permute(1, 2,

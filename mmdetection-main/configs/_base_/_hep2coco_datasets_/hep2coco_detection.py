@@ -38,7 +38,7 @@ test_pipeline = [
 
 # ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #
 
-ann_files=[
+ann_files = [
     'Nm_1m__b00000001__e00100000.json',
     'Nm_1m__b00100001__e00200000.json',
     'Nm_1m__b00200001__e00300000.json',
@@ -48,7 +48,8 @@ ann_files=[
     'Nm_1m__b00600001__e00700000.json',
     'Nm_1m__b00700001__e00800000.json',
     'Nm_1m__b00800001__e00900000.json',
-    'Nm_1m__b00900001__e00986343.json']
+    'Nm_1m__b00900001__e00986343.json',
+]
 train_dataset_base = dict(
     type=dataset_type,
     data_root=data_root,

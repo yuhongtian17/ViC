@@ -1,5 +1,5 @@
 import datetime
-from typing import Optional, List
+from typing import Optional
 
 import numpy as np
 import mmcv
@@ -39,7 +39,6 @@ def str_to_numbers(
 
 def create_bg_np(
     h, w, c,
-    with_time: int = 0,
     bg_version: Optional[str] = None,
     snr_db: float = 10.0,
 ) -> np.ndarray:
@@ -64,9 +63,6 @@ def create_bg_np(
     else:
         img_np = np.zeros((h, w, c))
 
-    if with_time > 1:
-        img_np = np.concatenate([img_np, np.zeros((h, w, 1))], axis=-1)
-
     return img_np
 
 
@@ -76,9 +72,9 @@ def eng_to_rgb_np(eng):
 
     eng_log10 = np.log10(eng)
 
-    index_low =            (eng_log10 <  -2.3)                                          # 小于5e-3 GeV
-    index_mid = np.vstack([(eng_log10 >= -2.3), (eng_log10 <  -1.3)]).all(axis=0)
-    index_high =                                (eng_log10 >= -1.3)                     # 大于5e-2 GeV
+    index_low  = (eng_log10 <  -2.3)                                                    # 小于5e-3 GeV
+    index_mid  = (eng_log10 >= -2.3) & (eng_log10 <  -1.3)
+    index_high =                       (eng_log10 >= -1.3)                              # 大于5e-2 GeV
 
     r = np.zeros_like(eng)
     g = np.zeros_like(eng)
@@ -86,10 +82,10 @@ def eng_to_rgb_np(eng):
 
     if index_low.any():
         rgb_norm =   np.clip((eng_log10[index_low] + 3.3), a_min=0, a_max=1) ** 0.5     # [-3.3, -2.3) -> [0, 1)
-        b[index_low] = rgb_norm * 255 + 1
+        b[index_low]  = rgb_norm * 255 + 1
     if index_mid.any():
         rgb_norm =           (eng_log10[index_mid] + 2.3)                    ** 0.6     # [-2.3, -1.3) -> [0, 1)
-        g[index_mid] = rgb_norm * 255 + 1
+        g[index_mid]  = rgb_norm * 255 + 1
     if index_high.any():
         #                                    in rad: np.arctan(3) = 1.2490457723982544
         rgb_norm = np.arctan((eng_log10[index_high] + 1.3) * 2.5) / 1.2490457723982544  # [-1.3, -0.1) -> [0, 1)
@@ -100,13 +96,12 @@ def eng_to_rgb_np(eng):
 
 def load_rgb(
     single_image: dict,
-    with_time: int = 0,
     bg_version: Optional[str] = None,
     snr_db: float = 10.0,
 ) -> np.ndarray:
     """
     加载RGB值。要求：
-    single_image具有这些键: 'height', 'width', 'n_hit', 'm_eng', 'xyxy', 'm_time'
+    single_image具有这些键: 'height', 'width', 'n_hit', 'm_eng', 'xyxy'
     """
 
     h = single_image['height']
@@ -115,30 +110,27 @@ def load_rgb(
 
     img_np = create_bg_np(
         h, w, c, 
-        with_time, 
-        bg_version, snr_db, 
+        bg_version = bg_version, 
+        snr_db = snr_db, 
     )
 
     n_hit = single_image['n_hit']
     m_eng = single_image['m_eng']
     xyxy = single_image['xyxy']
-    m_time = single_image['m_time']
 
     r_array, g_array, b_array = eng_to_rgb_np(np.array(m_eng))  # Here `m_eng` is a list!
 
     for i in range(n_hit):
         r, g, b = r_array[i], g_array[i], b_array[i]
         xmin, ymin, xmax, ymax = xyxy[i]
-        img_np[ymin:ymax, xmin:xmax, :3] = np.array([b, g, r])
-        if with_time > 1:
-            img_np[ymin:ymax, xmin:xmax, 3] = m_time[i] + 1     # {0, 1, 2, ..., 20} -> {1, 2, 3, ..., 21}
+        img_np[ymin:ymax, xmin:xmax, 0:3] = np.array([b, g, r])
 
     return img_np
 
 
 def visualization(
     single_image: dict,
-    gts: List[dict] = None,
+    single_gt: dict = None,
     single_pred: dict = None,
     output_dir: str = "./",
     with_hint: bool = True,
@@ -146,10 +138,10 @@ def visualization(
     """可视化函数（图像保存到本地）
     要求：
     single_image具有这些键: 'file_name', 'height', 'width', 'n_hit', 'm_eng', 'xyxy'
-    gts的列表元素具有这些键: 'p_RM', 'bbox'
-    single_pred具有这些键: 'pred_instances.bboxes'
+    single_gt   具有这些键: 'p_RM', 'bbox'
+    single_pred 具有这些键: 'pred_instances.bboxes'
     """
-    file_name = single_image['file_name']  # e.g. 'Nm_1m_00000001.png'
+    file_name = single_image['file_name']
 
     t1 = datetime.datetime.now()
 
@@ -161,15 +153,12 @@ def visualization(
     if with_hint: print("[numpy]  : write BGR value successfully! time: {}".format(t2 - t1))
 
     # 可视化gt框
-    if isinstance(gts, list) and len(gts) > 0:
-        gt_eng = gts[0]['p_RM']
+    if single_gt is not None:
+        gt_eng = single_gt['p_RM']
         output_img_path = output_dir + "gt_{:04}MeV_".format(int(gt_eng * 1000)) + file_name
 
-        bboxes_list = []
-        for gt in gts:
-            x1, y1, w1, h1 = gt['bbox']
-            bboxes_list.append([x1, y1, x1 + w1, y1 + h1])
-        bboxes = np.array(bboxes_list)
+        x1, y1, w1, h1 = single_gt['bbox']
+        bboxes = np.array([[x1, y1, x1 + w1, y1 + h1]])
 
         t3 = datetime.datetime.now()
 

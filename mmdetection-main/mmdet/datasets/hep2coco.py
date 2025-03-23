@@ -20,8 +20,7 @@ class Hep2CocoDataset(BaseDetDataset):
 
     METAINFO = {
         'classes':
-        # ('Nm', 'Np', 'Lmdm', 'Lmdp'),
-        # ('Nm', 'Np'),
+        # ('Nm', 'Lmdm', 'Np', 'Lmdp'),
         ('Nm', 'Lmdm'),
         # palette is a list of color tuples, which is used for visualization.
         'palette':
@@ -131,6 +130,8 @@ class Hep2CocoDataset(BaseDetDataset):
         # NEW!
         data_info['n_hit'] = img_info['n_hit']
         data_info['m_eng'] = img_info['m_eng']
+        # data_info['m_phi'] = img_info['m_phi']
+        # data_info['m_the'] = img_info['m_the']
         data_info['xyxy'] = img_info['xyxy']
         data_info['m_time'] = img_info['m_time']
 
@@ -169,6 +170,9 @@ class Hep2CocoDataset(BaseDetDataset):
             instance['p_RM'] = ann['p_RM']
             instance['phi_RM'] = ann['phi_RM']
             instance['the_RM'] = ann['the_RM']
+            # instance['px_RM'] = ann['px_RM']
+            # instance['py_RM'] = ann['py_RM']
+            # instance['pz_RM'] = ann['pz_RM']
 
             # NEW!
             if self.ber_thr > 0 and self.ber_thr > ann['ber']:      # e.g. ignore 0.4 if ber_thr=+0.5

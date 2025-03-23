@@ -233,8 +233,8 @@ def root_to_json(
             single_image['height'] = height
             single_image['n_hit'] = n_hit_i
             single_image['m_eng'] = m_eng_array.tolist()
-            # single_image['m_phi'] = m_phi_array.tolist()
-            # single_image['m_the'] = m_the_array.tolist()
+            single_image['m_phi'] = m_phi_array.tolist()
+            single_image['m_the'] = m_the_array.tolist()
             single_image['xyxy'] = xyxy_array.astype(int).tolist()
             single_image['m_time'] = m_time_array.tolist()
             data_dict['images'].append(single_image)

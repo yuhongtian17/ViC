@@ -59,10 +59,13 @@ model = dict(
         mmt_use_gloattn=True,
         mmt_in_channels=768,
         hw_shape=[15, 30],
-        block_type='HeatKBlock',
-        drop_path=0.1,
         stacked_blocks=2,
+        block_type='HeatKBlock',
         feat_fusion_mode='cat',
+        drop_path=0.1,
+        mlp_ratio=4.0,
+        post_norm=False,
+        layer_scale=None,
         with_cp=True),
     # model training and testing settings
     train_cfg=dict(
