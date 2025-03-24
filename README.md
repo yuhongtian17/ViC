@@ -115,7 +115,7 @@ python ./tools/dataset_converters/root_to_json.py --srcfile "./data/BESIII_train
 CUDA_VISIBLE_DEVICES=0,1,2,3 PORT=33010 ./tools/dist_train.sh "./configs/_hep2coco_/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco.py" 4
 # Test ViC
 CUDA_VISIBLE_DEVICES=0,1,2,3 PORT=33020 ./tools/dist_test.sh "./configs/_hep2coco_/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco.py" "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/epoch_12.pth" 4 --out "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/results_ep12.pkl"
-python ./tools/analysis_tools/hep_eval.py --pkl "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/results_ep12.pkl" --json "./data/HEP2COCO/bbox_scale_10/Nm_1m__b00000001__e00100000.json" --output_dir "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/" --excel_name "results_ep12.xlsx"
+python ./tools/analysis_tools/hep_eval.py --pkl_path "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/results_ep12.pkl" --json_path "./data/HEP2COCO/bbox_scale_10/Nm_1m__b00000001__e00100000.json" --output_dir "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/" --excel_name "results_ep12.xlsx"
 ```
 
 ## Bugs Report
