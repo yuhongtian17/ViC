@@ -23,7 +23,7 @@ from tools.dataset_converters.root_to_utils import load_rgb
 
 
 @TRANSFORMS.register_module()
-class LoadImageFromHEPeng(LoadImageFromFile):
+class LoadImageFromHEP(LoadImageFromFile):
     """Load an image from ``results['m_eng']``.
 
     Similar with :obj:`LoadImageFromFile`, but the image has been loaded as

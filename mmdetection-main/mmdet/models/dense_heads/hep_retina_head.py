@@ -602,11 +602,11 @@ class HEPRetinaHead(AnchorHead):
 
         return cls_scores, bbox_preds, mmt_reg_preds
 
-    def mmt_encode(self, gt_mmts) -> Tensor:
-        return (torch.log(gt_mmts / self.mmt_base) - self.mmt_mean) / self.mmt_std
+    def mmt_encode(self, mmt_gts) -> Tensor:
+        return (torch.log(mmt_gts / self.mmt_base) - self.mmt_mean) / self.mmt_std
 
-    def mmt_decode(self, pred_mmts) -> Tensor:
-        return torch.exp(pred_mmts * self.mmt_std + self.mmt_mean) * self.mmt_base
+    def mmt_decode(self, mmt_preds) -> Tensor:
+        return torch.exp(mmt_preds * self.mmt_std + self.mmt_mean) * self.mmt_base
 
 
     # ##### ##### ##### ##### ##### #####   from anchor_head.py   ##### ##### ##### ##### ##### ##### #

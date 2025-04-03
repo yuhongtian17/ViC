@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>System Error</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .error-container {
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 30px;
+            background: #ffecec;
+            border: 2px solid #ff4444;
+            border-radius: 10px;
+        }
+        .error-code {
+            color: #cc0000;
+            font-size: 24px;
+        }
+    </style>
+</head>
+<body>
+    <div class="error-container">
+        <h1 class="error-code">System error occured!</h1>
+        <div class="error-details">
+            <p>{{ error }}</p>
+            <p>Please refresh your webpage or contact your administrator.</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -18,7 +18,7 @@ data_root = 'data/HEP2COCO/bbox_scale_10/'
 backend_args = None
 
 train_pipeline = [
-    dict(type='LoadImageFromHEPeng', backend_args=backend_args,
+    dict(type='LoadImageFromHEP', backend_args=backend_args,
          bg_version='black_randn', snr_db=10.0),
     dict(type='HEPLoadAnnotations', with_bbox=True, with_mmt=True),
     dict(type='Resize', scale=(960, 480), keep_ratio=True),
@@ -26,7 +26,7 @@ train_pipeline = [
     dict(type='HEPPackDetInputs')
 ]
 test_pipeline = [
-    dict(type='LoadImageFromHEPeng', backend_args=backend_args,
+    dict(type='LoadImageFromHEP', backend_args=backend_args,
          bg_version='black_randn_seed', snr_db=10.0),
     dict(type='HEPLoadAnnotations', with_bbox=True, with_mmt=True),
     dict(type='Resize', scale=(960, 480), keep_ratio=True),
