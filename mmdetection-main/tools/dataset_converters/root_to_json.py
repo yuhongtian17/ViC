@@ -4,8 +4,7 @@
 # Others:
 # python ./tools/dataset_converters/root_to_json.py --easy_scale -1 --scales 80
 # python ./tools/dataset_converters/root_to_json.py --srcroot "./data/BESIII_training_sample/Nm_1m.root" --fn_prefix "Nm_1m" --split_size 100000
-# python ./tools/dataset_converters/root_to_json.py --srcroot "./data/BESIII_training_sample/Lmdm_1m.root" --fn_prefix "Lmdm_1m" --split_size 80000
-# python ./tools/dataset_converters/root_to_json.py --srcroot "./data/BESIII_training_sample/LmdLmd_with_pi0.root" --destroot "./data/HEP2COCO/" --df_prefix "Nm_lmdlmd_pi0" --fn_prefix "Nm_lmdlmd_pi0"
+# python ./tools/dataset_converters/root_to_json.py --srcroot "./data/BESIII_training_sample/Nm_reweight_mom.root" --df_prefix "Nm_rew" --fn_prefix "Nm_rew" --split_size 100000
 # python ./tools/dataset_converters/root_to_json.py --srcroot "./data/Neutron_sample_full/" --fn_prefix "Nm_fullana"
 
 import os

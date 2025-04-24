@@ -60,11 +60,10 @@ from mmdet.registry import MODELS
 from mmdet.structures.bbox import BaseBoxes, cat_boxes, get_box_tensor
 from mmdet.utils import InstanceList, OptInstanceList
 
-from ..task_modules.prior_generators import anchor_inside_flags
-from ..utils import (images_to_levels, multi_apply, unmap,
-                     filter_scores_and_topk, select_single_mlvl)
-
-from .anchor_head import AnchorHead
+from mmdet.models.task_modules.prior_generators import anchor_inside_flags
+from mmdet.models.utils import (images_to_levels, multi_apply, unmap,
+                                filter_scores_and_topk, select_single_mlvl)
+from mmdet.models.dense_heads import AnchorHead
 
 
 import os
@@ -274,6 +273,9 @@ class HEPRetinaHead(AnchorHead):
                  mmt_base=1.0,                                                                      # mmt
                  mmt_mean=0.0,
                  mmt_std=1.0,
+                 mmt_min=0.0,
+                 mmt_max=1.2,
+                 encode_sigmoid_mmt=False,
                  loss_mmt_reg=dict(type='L1Loss', loss_weight=1.0),
                  mmt_use_fpn=False,                                                                 # gloattn
                  mmt_use_gloattn=True,
@@ -300,6 +302,10 @@ class HEPRetinaHead(AnchorHead):
         self.mmt_base = mmt_base                                                                    # mmt
         self.mmt_mean = mmt_mean
         self.mmt_std = mmt_std
+        self.mmt_min = mmt_min
+        self.mmt_max = mmt_max
+        self.encode_sigmoid_mmt = encode_sigmoid_mmt
+        self.use_sigmoid_mmt = loss_mmt_reg.get('use_sigmoid', False)
         self.use_mmt_reg = (loss_mmt_reg is not None)
 
         self.mmt_use_fpn = mmt_use_fpn                                                              # gloattn
@@ -318,6 +324,7 @@ class HEPRetinaHead(AnchorHead):
         self.with_cp = with_cp
 
         self.mmt_reg_channels = 1
+        self.eps = 1e-6
 
         super().__init__(
             num_classes,
@@ -572,6 +579,7 @@ class HEPRetinaHead(AnchorHead):
         if self.use_mmt_reg and self.mmt_use_gloattn:
             mmt_reg_feat = backbone_feat
 
+            # # 调整self.freq_embed的大小（可忽略）
             # if self.freq_embed is None:
             #     resized_freq_embed = self.freq_embed
             # elif self.freq_embed.shape[:2] != mmt_reg_feat.shape[2:]:
@@ -582,18 +590,21 @@ class HEPRetinaHead(AnchorHead):
             # else:
             #     resized_freq_embed = self.freq_embed
 
+            # 回归单个mmt
             for block in self.mmt_reg_blocks:
                 if 'Heat' in block.__class__.__name__:
                     mmt_reg_feat = block(mmt_reg_feat, self.freq_embed)
                 else:
                     mmt_reg_feat = block(mmt_reg_feat)
 
-            mmt_reg_raw = self.mmt_reg_fc(mmt_reg_feat)
+            # 在维度上展开回归的mmt使其与featmap等大。如果FPN也回归了mmt，那么将两者相加
+            mmt_reg_preds_use_gloattn = self.mmt_reg_fc(mmt_reg_feat)
             mmt_reg_preds = []
             num_levels = len(bbox_preds)
             for level in range(num_levels):
                 B, C, H, W = bbox_preds[level].shape
-                temp = mmt_reg_raw[:, None, :, None, None].repeat(1, self.num_base_priors, 1, H, W).flatten(1, 2)
+                temp = mmt_reg_preds_use_gloattn[:, None, :, None, None].repeat(
+                    1, self.num_base_priors, 1, H, W).flatten(1, 2)
                 if mmt_reg_preds_use_fpn[level] is not None:
                     temp += mmt_reg_preds_use_fpn[level]
                 mmt_reg_preds.append(temp)
@@ -602,12 +613,19 @@ class HEPRetinaHead(AnchorHead):
 
         return cls_scores, bbox_preds, mmt_reg_preds
 
-    def mmt_encode(self, mmt_gts) -> Tensor:
+    def mmt_encode_base(self, mmt_gts) -> Tensor:
         return (torch.log(mmt_gts / self.mmt_base) - self.mmt_mean) / self.mmt_std
 
-    def mmt_decode(self, mmt_preds) -> Tensor:
+    def mmt_decode_base(self, mmt_preds) -> Tensor:
         return torch.exp(mmt_preds * self.mmt_std + self.mmt_mean) * self.mmt_base
+    
+    def mmt_encode_sigmoid(self, mmt_gts) -> Tensor:
+        mmt_norm = torch.clamp((mmt_gts - self.mmt_min) / (self.mmt_max - self.mmt_min),
+                               min = self.eps, max = 1 - self.eps)
+        return mmt_norm
 
+    def mmt_decode_sigmoid(self, mmt_preds) -> Tensor:
+        return torch.sigmoid(mmt_preds) * (self.mmt_max - self.mmt_min) + self.mmt_min
 
     # ##### ##### ##### ##### ##### #####   from anchor_head.py   ##### ##### ##### ##### ##### ##### #
 
@@ -706,7 +724,11 @@ class HEPRetinaHead(AnchorHead):
 
             if self.use_mmt_reg:                                                                    # mmt
                 # 由于loss_mmt_reg无法使用`IouLoss`, `GIouLoss`等损失函数，因此必须对gt预编码而非对pred预解码！
-                mmt_reg_targets[pos_inds, :] = self.mmt_encode(sampling_result.pos_gt_mmt_regs)
+                if self.encode_sigmoid_mmt:
+                    pos_mmt_reg_targets = self.mmt_encode_sigmoid(sampling_result.pos_gt_mmt_regs)
+                else:
+                    pos_mmt_reg_targets = self.mmt_encode_base(sampling_result.pos_gt_mmt_regs)
+                mmt_reg_targets[pos_inds, :] = pos_mmt_reg_targets
                 mmt_reg_weights[pos_inds, :] = 1.0
 
             labels[pos_inds] = sampling_result.pos_gt_labels
@@ -913,6 +935,9 @@ class HEPRetinaHead(AnchorHead):
             mmt_reg_weights = mmt_reg_weights.reshape(-1, self.mmt_reg_channels)
             mmt_reg_pred = mmt_reg_pred.permute(0, 2, 3, 1).reshape(-1, self.mmt_reg_channels)
             # 由于loss_mmt_reg无法使用`IouLoss`, `GIouLoss`等损失函数，因此必须对gt预编码而非对pred预解码！
+            # 如果对gt进行了sigmoid预编码、但后续使用L1Loss/L2Loss等而非使用BCELoss，必须也对mmt_reg_pred预编码！
+            if self.encode_sigmoid_mmt and not self.use_sigmoid_mmt:
+                mmt_reg_pred = torch.sigmoid(mmt_reg_pred)
             loss_mmt_reg = self.loss_mmt_reg(
                 mmt_reg_pred, mmt_reg_targets, mmt_reg_weights, avg_factor=avg_factor)
         else:
@@ -1268,7 +1293,12 @@ class HEPRetinaHead(AnchorHead):
         bboxes = self.bbox_coder.decode(priors, bbox_pred, max_shape=img_shape)
 
         mmt_pred = torch.cat(mlvl_mmt_preds)                                                        # mmt
-        mmts = self.mmt_decode(mmt_pred) if self.use_mmt_reg else mmt_pred                          # mmt
+        if not self.use_mmt_reg:                                                                    # mmt
+            mmts = mmt_pred
+        elif self.encode_sigmoid_mmt:
+            mmts = self.mmt_decode_sigmoid(mmt_pred)
+        else:
+            mmts = self.mmt_decode_base(mmt_pred)
 
         results = InstanceData()
         results.bboxes = bboxes

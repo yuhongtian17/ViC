@@ -1,6 +1,6 @@
 # dataset settings
 dataset_type = 'Hep2CocoDataset'
-data_root = 'data/HEP2COCO/bbox_scale_10/'
+data_root = 'data/HEP2COCO/Nm_rew/'
 
 # Example to use different file client
 # Method 1: simply set the data root and let the file I/O module
@@ -39,16 +39,24 @@ test_pipeline = [
 # ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #
 
 ann_files = [
-    'Nm_1m__b00000001__e00100000.json',
-    'Nm_1m__b00100001__e00200000.json',
-    'Nm_1m__b00200001__e00300000.json',
-    'Nm_1m__b00300001__e00400000.json',
-    'Nm_1m__b00400001__e00500000.json',
-    'Nm_1m__b00500001__e00600000.json',
-    'Nm_1m__b00600001__e00700000.json',
-    'Nm_1m__b00700001__e00800000.json',
-    'Nm_1m__b00800001__e00900000.json',
-    'Nm_1m__b00900001__e00986343.json',
+    'Nm_rew__b00000001__e00100000.json',
+    'Nm_rew__b00100001__e00200000.json',
+    'Nm_rew__b00200001__e00300000.json',
+    'Nm_rew__b00300001__e00400000.json',
+    'Nm_rew__b00400001__e00500000.json',
+    'Nm_rew__b00500001__e00600000.json',
+    'Nm_rew__b00600001__e00700000.json',
+    'Nm_rew__b00700001__e00800000.json',
+    'Nm_rew__b00800001__e00900000.json',
+    'Nm_rew__b00900001__e01000000.json',
+    # 'Nm_rew__b01000001__e01100000.json',
+    # 'Nm_rew__b01100001__e01200000.json',
+    # 'Nm_rew__b01200001__e01300000.json',
+    # 'Nm_rew__b01300001__e01400000.json',
+    # 'Nm_rew__b01400001__e01500000.json',
+    # 'Nm_rew__b01500001__e01600000.json',
+    # 'Nm_rew__b01600001__e01700000.json',
+    # 'Nm_rew__b01700001__e01769709.json',
 ]
 train_dataset_base = dict(
     type=dataset_type,

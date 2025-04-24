@@ -29,8 +29,10 @@ train_dataloader = dict(
         pipeline=train_pipeline,
         backend_args=backend_args))
 
+epoch_ratio = 9
+
 # training schedule for 1x
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=12*9, val_interval=1*9)
+train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=12 *epoch_ratio, val_interval=1 *epoch_ratio)
 
 # learning rate
 param_scheduler = [
@@ -39,8 +41,8 @@ param_scheduler = [
     dict(
         type='MultiStepLR',
         begin=0,
-        end=12*9,
+        end=12 *epoch_ratio,
         by_epoch=True,
-        milestones=[8*9, 11*9],
+        milestones=[8 *epoch_ratio, 11 *epoch_ratio],
         gamma=0.1)
 ]

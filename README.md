@@ -21,7 +21,7 @@ Full paper is available at https://arxiv.org/abs/2408.10599.
 
 ## Dataset
 
-A [valset](https://github.com/yuhongtian17/ViC/releases/download/ViC-250214/Nm_1m__b00000001__e00100000.json) of $\bar{n}$ dataset is available.
+A [valset](https://github.com/yuhongtian17/ViC/releases/download/ViC-checkpoints/Nm_1m__b00000001__e00100000.json) of $\bar{n}$ dataset is available.
 
 ## Install MMDetection Step by Step
 
