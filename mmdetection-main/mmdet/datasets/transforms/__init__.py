@@ -25,6 +25,9 @@ from .transforms import (Albu, CachedMixUp, CachedMosaic, CopyPaste, CutOut,
 from .wrappers import MultiBranch, ProposalBroadcaster, RandomOrder
 
 from .hep2coco_loading import LoadImageFromHEP, HEPLoadAnnotations, HEPPackDetInputs
+from .hep2coco_transforms import RandomCyclicShift
+from .hep2seq_loading import (LoadSeqFromHEPv2, HEPv2LoadAnnotations, HEPv2PackDetInputs,
+                              HEPv2PackInputs)
 
 __all__ = [
     'PackDetInputs', 'ToTensor', 'ImageToTensor', 'Transpose',
@@ -46,4 +49,7 @@ __all__ = [
     'RandomSamplingNegPos', 'LoadTextAnnotations',
 
     'LoadImageFromHEP', 'HEPLoadAnnotations', 'HEPPackDetInputs',
+    'RandomCyclicShift',
+    'LoadSeqFromHEPv2', 'HEPv2LoadAnnotations', 'HEPv2PackDetInputs',
+    'HEPv2PackInputs',
 ]

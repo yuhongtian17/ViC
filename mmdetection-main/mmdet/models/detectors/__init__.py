@@ -60,6 +60,8 @@ from .yolof import YOLOF
 from .yolox import YOLOX
 
 from .hep_retinanet import HEPRetinaNet
+from .hepv2_ssd import HEPv2SSD
+from .hepv2_selfsup import HEPv2SelfSupervisor
 
 __all__ = [
     'ATSS', 'BaseDetector', 'SingleStageDetector', 'TwoStageDetector', 'RPN',
@@ -76,4 +78,6 @@ __all__ = [
     'DDQDETR', 'GroundingDINO',
 
     'HEPRetinaNet',
+    'HEPv2SSD',
+    'HEPv2SelfSupervisor',
 ]

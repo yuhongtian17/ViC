@@ -1,6 +1,6 @@
 # dataset settings
-dataset_type = 'Hep2CocoDataset'
-data_root = 'data/HEP2COCO/bbox_scale_10/'
+dataset_type = 'Hep2SeqDataset'
+data_root = 'data/HEP2COCO/Nm_rew/'
 
 # Example to use different file client
 # Method 1: simply set the data root and let the file I/O module
@@ -18,37 +18,43 @@ data_root = 'data/HEP2COCO/bbox_scale_10/'
 backend_args = None
 
 train_pipeline = [
-    dict(type='LoadImageFromHEP', backend_args=backend_args,
-         bg_version='black_randn', snr_db=10.0),
-    dict(type='HEPLoadAnnotations', with_bbox=True, with_mmt=True),
-    dict(type='Resize', scale=(960, 480), keep_ratio=True),
-    dict(type='RandomFlip', prob=0.5),
-    dict(type='HEPPackDetInputs')
+    dict(type='LoadSeqFromHEPv2',
+         use_random_permutation=True,
+         use_cyclic_phi=True,
+         len_seq=640),
+    dict(type='HEPv2LoadAnnotations'),
+    dict(type='HEPv2PackDetInputs'),
 ]
 test_pipeline = [
-    dict(type='LoadImageFromHEP', backend_args=backend_args,
-         bg_version='black_randn_seed', snr_db=10.0),
-    dict(type='HEPLoadAnnotations', with_bbox=True, with_mmt=True),
-    dict(type='Resize', scale=(960, 480), keep_ratio=True),
-    dict(
-        type='HEPPackDetInputs',
-        meta_keys=('img_id', 'img_path', 'ori_shape', 'img_shape',
-                   'scale_factor'))
+    dict(type='LoadSeqFromHEPv2',
+         use_random_permutation=False,
+         use_cyclic_phi=True,
+         len_seq=640),
+    dict(type='HEPv2LoadAnnotations'),
+    dict(type='HEPv2PackDetInputs'),
 ]
 
 # ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #
 
 ann_files = [
-    'Nm_1m__b00000001__e00100000.json',
-    'Nm_1m__b00100001__e00200000.json',
-    'Nm_1m__b00200001__e00300000.json',
-    'Nm_1m__b00300001__e00400000.json',
-    'Nm_1m__b00400001__e00500000.json',
-    'Nm_1m__b00500001__e00600000.json',
-    'Nm_1m__b00600001__e00700000.json',
-    'Nm_1m__b00700001__e00800000.json',
-    'Nm_1m__b00800001__e00900000.json',
-    'Nm_1m__b00900001__e00986343.json',
+    'Nm_rew__b00000001__e00100000.json',
+    'Nm_rew__b00100001__e00200000.json',
+    'Nm_rew__b00200001__e00300000.json',
+    'Nm_rew__b00300001__e00400000.json',
+    'Nm_rew__b00400001__e00500000.json',
+    'Nm_rew__b00500001__e00600000.json',
+    'Nm_rew__b00600001__e00700000.json',
+    'Nm_rew__b00700001__e00800000.json',
+    'Nm_rew__b00800001__e00900000.json',
+    'Nm_rew__b00900001__e01000000.json',
+    # 'Nm_rew__b01000001__e01100000.json',
+    # 'Nm_rew__b01100001__e01200000.json',
+    # 'Nm_rew__b01200001__e01300000.json',
+    # 'Nm_rew__b01300001__e01400000.json',
+    # 'Nm_rew__b01400001__e01500000.json',
+    # 'Nm_rew__b01500001__e01600000.json',
+    # 'Nm_rew__b01600001__e01700000.json',
+    # 'Nm_rew__b01700001__e01769709.json',
 ]
 train_dataset_base = dict(
     type=dataset_type,
@@ -72,7 +78,7 @@ for i in range(1, len(ann_files)):
 # ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #
 
 train_dataloader = dict(
-    batch_size=16,
+    batch_size=64,
     num_workers=8,
     persistent_workers=True,
     sampler=dict(type='DefaultSampler', shuffle=True),
@@ -82,7 +88,7 @@ train_dataloader = dict(
         type='ConcatDataset',
         datasets=train_datasets))
 val_dataloader = dict(
-    batch_size=16,
+    batch_size=64,
     num_workers=8,
     persistent_workers=True,
     drop_last=False,

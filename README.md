@@ -1,7 +1,7 @@
-# Vision Calorimeter
+# Vision Calorimeter (ViC) and Language Modeling Calorimeter (LMC)
 
 <p align="left">
-<a href="https://arxiv.org/abs/2408.10599"><img src="https://img.shields.io/badge/arXiv-Paper-<color>"></a>
+<a href="https://arxiv.org/abs/2408.10599v2"><img src="https://img.shields.io/badge/arXiv-Paper-<color>"></a>
 </p>
 
 ## Abstract
@@ -17,7 +17,23 @@ Implemented via the Discrete Cosine Transform (DCT), HCO extracts frequency-doma
 Experimental results demonstrate that ViC significantly outperforms traditional approaches, reducing the incident position prediction error by 46.16\% (from $17.31^{\circ}$ to $9.32^{\circ}$) and providing the first baseline result with an incident momentum regression error of 21.48\%.
 This study underscores ViC's great potential as a general-purpose particle parameter estimator in high-energy physics. Code is available at https://github.com/yuhongtian17/ViC.
 
-Full paper is available at https://arxiv.org/abs/2408.10599.
+Full paper is available at https://arxiv.org/abs/2408.10599v2.
+
+<div align=center><img src="./figures/figure_2_v3.png"></div>
+
+<div align=center><img src="./figures/figure_3_v2.png"></div>
+
+In high-energy particle physics, anti-neutron ($\bar{n}$) serves as an important probe for studying fundamental units of the material world.
+Due to the discreteness and sparsity of data, it is challenging to measure the $\bar{n}$ features using machine learning algorithms.
+Recent studies have tackled the $\bar{n}$ detection problem using computer vision techniques, which, however, are puzzled by representation redundancy and model generalizability when handling discrete and sparse detector readouts.
+In this study, we propose the Language Modeling Calorimeter (LMC), by re-formulating the high-energy anti-neutron detection problem with language modeling.
+The motivation lies in that such models enjoy not only serialized representation consistent with discrete deposition patterns of $\bar{n}$ but also higher information density applicable to sparse data.
+LMC treats each $\bar{n}$ event as a "sentence" and each deposited energy point as a "word", constructing a token sequence for a Transformer model.
+The energy points also serve as spatial "anchors" for prediction, enabling the model to learn their correlations with the incident position and momentum of $\bar{n}$.
+LMC undergoes extensive pre-training on quantities of unlabeled $\bar{n}$ events to recover masked position values, providing underlying prior knowledge about spatial radiation patterns of energy.
+Experiments upon high-energy particle data show that LMC achieves state-of-the-art performance, while outperforms visual detectors in terms of statistical analysis and physical application. Code is available at https://github.com/yuhongtian17/ViC.
+
+Full paper is coming soon.
 
 ## Dataset
 
@@ -28,17 +44,16 @@ A [valset](https://github.com/yuhongtian17/ViC/releases/download/ViC-checkpoints
 Yes indeed, it depends on [PyTorch](https://pytorch.org/), [MMCV](https://github.com/open-mmlab/mmcv), [MMEngine](https://github.com/open-mmlab/mmengine) and [MMDetection](https://github.com/open-mmlab/mmdetection):
 
 ```shell
-# Also: cuda-12.4.1, torch-2.4.1, mmengine-0.10.4/0.10.5, mmcv-2.1.0/2.2.0, mmdet-3.3.0
 # Also: cann-8.0.rc2, torch-2.1.0, torch_npu-2.1.0.post6, mmengine-0.10.5, mmcv-2.2.0, mmdet-3.3.0
 
-wget https://developer.download.nvidia.com/compute/cuda/11.7.1/local_installers/cuda_11.7.1_515.65.01_linux.run
-chmod +x ./cuda_11.7.1_515.65.01_linux.run
-sudo sh cuda_11.7.1_515.65.01_linux.run
+wget https://developer.download.nvidia.com/compute/cuda/12.4.1/local_installers/cuda_12.4.1_550.54.15_linux.run
+chmod +x ./cuda_12.4.1_550.54.15_linux.run
+sudo sh cuda_12.4.1_550.54.15_linux.run
 
 vi ~/.bashrc
 # Add CUDA path
-# export PATH=/usr/local/cuda-11.7/bin:$PATH
-# export LD_LIBRARY_PATH=/usr/local/cuda-11.7/lib64:$LD_LIBRARY_PATH
+# export PATH=/usr/local/cuda-12.4/bin:$PATH
+# export LD_LIBRARY_PATH=/usr/local/cuda-12.4/lib64:$LD_LIBRARY_PATH
 source ~/.bashrc
 nvcc -V
 
@@ -47,17 +62,17 @@ wget https://mirror.tuna.tsinghua.edu.cn/anaconda/archive/Anaconda3-2024.10-1-Li
 chmod +x ./Anaconda3-2024.10-1-Linux-x86_64.sh
 ./Anaconda3-2024.10-1-Linux-x86_64.sh
 
-conda create -n openmmlab1131 python=3.9 -y
-conda activate openmmlab1131
-# ref: https://pytorch.org/get-started/previous-versions/#v1131
-conda install pytorch==1.13.1 torchvision==0.14.1 torchaudio==0.13.1 pytorch-cuda=11.7 -c pytorch -c nvidia
+conda create -n openmmlab241b python=3.9 -y
+conda activate openmmlab241b
+# ref: https://pytorch.org/get-started/previous-versions/#v241
+conda install pytorch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 pytorch-cuda=12.4 -c pytorch -c nvidia
 
-pip install numpy==1.26.4 ninja==1.11.1.1 psutil==6.1.0
+pip install numpy==1.26.4 ninja==1.11.1.1 psutil==6.1.0 --index https://pypi.tuna.tsinghua.edu.cn/simple/
+pip install matplotlib==3.9.3 opencv-python==4.10.0.84 cython==3.0.11 --index https://pypi.tuna.tsinghua.edu.cn/simple/
 
 pip install -U openmim
-mim install mmengine==0.10.4
-mim install mmcv==2.0.1
-mim install mmpretrain==1.2.0
+mim install mmengine==0.10.5
+mim install mmcv==2.2.0
 # mim install mmdet==3.3.0
 
 # git clone https://github.com/open-mmlab/mmdetection.git
@@ -66,8 +81,7 @@ wget https://github.com/open-mmlab/mmdetection/archive/refs/tags/v3.3.0.zip -O m
 unzip mmdetection-3.3.0.zip
 cd mmdetection-3.3.0/
 
-pip install -r requirements/build.txt
-pip install -v -e .
+pip install -v -e . --index https://pypi.tuna.tsinghua.edu.cn/simple/
 
 # IF MSCOCO2017 Dataset does not exist
 mkdir -p "./data/coco/"
@@ -85,12 +99,10 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 ./tools/dist_train.sh ./configs/retinanet/retinanet
 CUDA_VISIBLE_DEVICES=0,1,2,3 ./tools/dist_train.sh ./configs/swin/retinanet_swin-t-p4-w7_fpn_1x_coco.py 4
 ```
 
-## Train and Test with ViC
-
-ViC main code:
+## Train and Test
 
 ```shell
-pip install yacs timm uproot openpyxl einops fvcore
+pip install yacs timm uproot openpyxl einops fvcore --index https://pypi.tuna.tsinghua.edu.cn/simple/
 
 # Download our code
 cd ../
@@ -98,45 +110,51 @@ git clone https://github.com/yuhongtian17/ViC.git
 cp -r ViC/mmdetection-main/* mmdetection-3.3.0/
 cd mmdetection-3.3.0/
 
-# Prepare pre-trained model
+# Prepare dataset
+# NOTE: We regret that the release of *.root files requires further data-sharing agreements with BESIII.
+cd "./data/"
+unzip BESIII_training_sample.zip
+cd ../
+python ./tools/dataset_converters/root_to_json.py --srcroot "./data/BESIII_training_sample/Nm_1m.root" --df_prefix "Nm_1m" --fn_prefix "Nm_1m"
+
+# Prepare ViC's pre-trained model
 mkdir -p "./data/pretrained/"
 cd "./data/pretrained/"
 wget https://github.com/MzeroMiko/vHeat/releases/download/vheatcls/vHeat_tiny.pth
 python ../../vheat_pth_tools/interpolate4downstream.py --pt_pth 'vHeat_tiny.pth' --tg_pth 'vheat_tiny_512.pth'
 cd ../
 
-# Prepare dataset
-# NOTE: We regret that the release of *.root files requires further data-sharing agreements with BESIII.
-unzip BESIII_training_sample.zip
-cd ../
-python ./tools/dataset_converters/root_to_json.py --srcfile "./data/BESIII_training_sample/Nm_1m.root" --destroot "./data/HEP2COCO/"
-
 # Train ViC
-CUDA_VISIBLE_DEVICES=0,1,2,3 PORT=33010 ./tools/dist_train.sh "./configs/_hep2coco_/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco.py" 4
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 PORT=33010 ./tools/dist_train.sh "./configs/_hep2coco_/abla/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco-1m_8xbs16.py" 8
 # Test ViC
-CUDA_VISIBLE_DEVICES=0,1,2,3 PORT=33020 ./tools/dist_test.sh "./configs/_hep2coco_/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco.py" "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/epoch_12.pth" 4 --out "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/results_ep12.pkl"
-python ./tools/analysis_tools/hep_eval.py --pkl_path "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/results_ep12.pkl" --json_path "./data/HEP2COCO/bbox_scale_10/Nm_1m__b00000001__e00100000.json" --output_dir "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/" --excel_name "results_ep12.xlsx"
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 PORT=33020 ./tools/dist_test.sh "./configs/_hep2coco_/abla/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco-1m_8xbs16.py" "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco-1m_8xbs16/epoch_12.pth" 4 --out "./work_dirs/results_vic_1m_ep12.pkl"
+python ./tools/analysis_tools/hep_eval.py --pkl_path "./work_dirs/results_vic_1m_ep12.pkl" --json_path "./data/HEP2COCO/Nm_1m/Nm_1m__b00000001__e00100000.json"
+
+# Train LMC (learning from scratch)
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 PORT=33010 ./tools/dist_train.sh "./configs/_hep2seq_/abla_scratch/hepv2-ssd_trans-base_nofpn_1x_hep2seq-1m_8xbs64.py" 8
+# Test LMC
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 PORT=33020 ./tools/dist_test.sh "./configs/_hep2coco_/abla_scratch/hepv2-ssd_trans-base_nofpn_1x_hep2seq-1m_8xbs64.py" "./work_dirs/hepv2-ssd_trans-base_nofpn_1x_hep2seq-1m_8xbs64/epoch_12.pth" 4 --out "./work_dirs/results_lmc_1m_ep12.pkl"
+python ./tools/analysis_tools/hep_eval.py --pkl_path "./work_dirs/results_lmc_1m_ep12.pkl" --json_path "./data/HEP2COCO/Nm_1m/Nm_1m__b00000001__e00100000.json"
 ```
 
 ## Bugs Report
 
-An error may occur on the new server: "ImportError: libGL.so.1: cannot open shared object file: No such file or directory." It can be solved by the following shell command:
+(1) An error may occur on the new server: "ImportError: libGL.so.1: cannot open shared object file: No such file or directory." It can be solved by the following shell command:
 
 ```shell
 sudo apt update
 sudo apt install libgl1-mesa-glx
 ```
 
-## Citation
+(2) An error may occur on the RTX 4090 server when training LMC: "RuntimeError: received 0 items of ancdata". It can be solved by the following shell command:
 
+```shell
+echo "ulimit -n 1048576" >> ~/.bashrc
+source ~/.bashrc
+ulimit -n
 ```
-@article{vic,
-  title={Vision Calorimeter: Migrating Visual Object Detector to High-energy Particle Images},
-  author={Yu, Hongtian and Li, Yangu and Liu, Yunfan and Song, Yunxuan and Lyu, Xiaorui and Ye, Qixiang},
-  journal={arXiv preprint arXiv:2408.10599},
-  year={2024}
-}
-```
+
+The output result is 1048576 instead of 1024, indicating successful modification.
 
 ## License
 

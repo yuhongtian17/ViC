@@ -36,6 +36,7 @@ from .xml_style import XMLDataset
 from .youtube_vis_dataset import YouTubeVISDataset
 
 from .hep2coco import Hep2CocoDataset
+from .hep2seq import Hep2SeqDataset
 
 __all__ = [
     'XMLDataset', 'CocoDataset', 'DeepFashionDataset', 'VOCDataset',
@@ -52,6 +53,7 @@ __all__ = [
     'ADE20KInstanceDataset', 'iSAIDDataset', 'V3DetDataset', 'ConcatDataset',
     'ODVGDataset', 'MDETRStyleRefCocoDataset', 'DODDataset',
     'CustomSampleSizeSampler', 'Flickr30kDataset',
-
+    
     'Hep2CocoDataset',
+    'Hep2SeqDataset',
 ]

@@ -55,9 +55,10 @@ from torch import Tensor
 from mmengine.config import ConfigDict
 from mmengine.structures import InstanceData
 from mmcv.cnn import ConvModule
+from mmcv.ops import batched_nms
 
 from mmdet.registry import MODELS
-from mmdet.structures.bbox import BaseBoxes, cat_boxes, get_box_tensor
+from mmdet.structures.bbox import BaseBoxes, cat_boxes, get_box_tensor, get_box_wh, scale_boxes
 from mmdet.utils import InstanceList, OptInstanceList
 
 from mmdet.models.task_modules.prior_generators import anchor_inside_flags
@@ -72,7 +73,7 @@ import torch.utils.checkpoint as cp
 from mmcv.cnn import build_norm_layer
 from mmcv.cnn.bricks import DropPath
 
-from mmdet.models.backbones.vheat_models.vit import window_partition, window_unpartition, Attention, Mlp
+from projects.ViTDet.vitdet.vit import window_partition, window_unpartition, Attention, Mlp
 from mmdet.models.backbones.vheat_models.vHeat import LayerNorm2d, HeatBlock
 from mmdet.models.backbones.vheat_models.vHeatK import HeatKBlock
 from timm.models.layers import trunc_normal_
@@ -597,16 +598,27 @@ class HEPRetinaHead(AnchorHead):
                 else:
                     mmt_reg_feat = block(mmt_reg_feat)
 
-            # 在维度上展开回归的mmt使其与featmap等大。如果FPN也回归了mmt，那么将两者相加
+            # 在维度上展开回归的mmt使其与featmap等大
             mmt_reg_preds_use_gloattn = self.mmt_reg_fc(mmt_reg_feat)
             mmt_reg_preds = []
-            num_levels = len(bbox_preds)
+            num_levels = len(cls_scores)
             for level in range(num_levels):
-                B, C, H, W = bbox_preds[level].shape
+                cls_score = cls_scores[level]
+                B, C, H, W = cls_score.shape
                 temp = mmt_reg_preds_use_gloattn[:, None, :, None, None].repeat(
                     1, self.num_base_priors, 1, H, W).flatten(1, 2)
+
                 if mmt_reg_preds_use_fpn[level] is not None:
-                    temp += mmt_reg_preds_use_fpn[level]
+                    # OLD: 如果FPN也回归了mmt，那么将两者相加
+                    # temp += mmt_reg_preds_use_fpn[level]
+
+                    # NEW: 如果FPN也回归了mmt，那么将cls_score最大值索引不等于0的那些mmt
+                    #     替换为mmt_reg_preds_use_fpn[level]。适用于多目标检测
+                    cls_score = cls_score.reshape(B, self.num_base_priors, self.cls_out_channels, H, W)
+                    max_values, max_indices = cls_score.max(dim=2, keepdim=False)
+                    replace_mask = (max_indices > 0)
+                    temp[replace_mask] = mmt_reg_preds_use_fpn[level][replace_mask]
+
                 mmt_reg_preds.append(temp)
         else:
             mmt_reg_preds = mmt_reg_preds_use_fpn
@@ -1315,12 +1327,89 @@ class HEPRetinaHead(AnchorHead):
             with_nms=with_nms,
             img_meta=img_meta)
 
-    # def _bbox_post_process(self,
-    #                        results: InstanceData,
-    #                        cfg: ConfigDict,
-    #                        rescale: bool = False,
-    #                        with_nms: bool = True,
-    #                        img_meta: Optional[dict] = None) -> InstanceData: pass
+    def _bbox_post_process(self,
+                           results: InstanceData,
+                           cfg: ConfigDict,
+                           rescale: bool = False,
+                           with_nms: bool = True,
+                           img_meta: Optional[dict] = None) -> InstanceData:
+        """bbox post-processing method.
+
+        The boxes would be rescaled to the original image scale and do
+        the nms operation. Usually `with_nms` is False is used for aug test.
+
+        Args:
+            results (:obj:`InstaceData`): Detection instance results,
+                each item has shape (num_bboxes, ).
+            cfg (ConfigDict): Test / postprocessing configuration,
+                if None, test_cfg would be used.
+            rescale (bool): If True, return boxes in original image space.
+                Default to False.
+            with_nms (bool): If True, do nms before return boxes.
+                Default to True.
+            img_meta (dict, optional): Image meta info. Defaults to None.
+
+        Returns:
+            :obj:`InstanceData`: Detection results of each image
+            after the post process.
+            Each item usually contains following keys.
+
+                - scores (Tensor): Classification scores, has a shape
+                  (num_instance, )
+                - labels (Tensor): Labels of bboxes, has a shape
+                  (num_instances, ).
+                - bboxes (Tensor): Has a shape (num_instances, 4),
+                  the last dimension 4 arrange as (x1, y1, x2, y2).
+        """
+
+        # NEW!
+        w_shift = img_meta.get('w_shift', 0)
+        if w_shift > 0:
+            img_shape = img_meta.get('img_shape')
+            assert w_shift == img_shape[1]
+
+            r_shift_px = img_meta.get('r_shift_px')
+            assert r_shift_px is not None
+
+            l_shift_px = r_shift_px - w_shift
+
+            bboxes = results.bboxes
+            bboxes_x_ctr = (bboxes[:, 0] + bboxes[:, 2]) * 0.5              # results['gt_bboxes']: xmin, ymin, xmax, ymax
+            r_ind = ((bboxes_x_ctr - r_shift_px) >= 0)                      # 判断向右平移的逆过程是否未越界
+
+            bboxes[r_ind, 0::2] -= r_shift_px
+            bboxes[~r_ind, 0::2] -= l_shift_px
+            results.bboxes = bboxes
+
+        if rescale:
+            assert img_meta.get('scale_factor') is not None
+            scale_factor = [1 / s for s in img_meta['scale_factor']]
+            results.bboxes = scale_boxes(results.bboxes, scale_factor)
+
+        if hasattr(results, 'score_factors'):
+            # TODO： Add sqrt operation in order to be consistent with
+            #  the paper.
+            score_factors = results.pop('score_factors')
+            results.scores = results.scores * score_factors
+
+        # filter small size bboxes
+        if cfg.get('min_bbox_size', -1) >= 0:
+            w, h = get_box_wh(results.bboxes)
+            valid_mask = (w > cfg.min_bbox_size) & (h > cfg.min_bbox_size)
+            if not valid_mask.all():
+                results = results[valid_mask]
+
+        # TODO: deal with `with_nms` and `nms_cfg=None` in test_cfg
+        if with_nms and results.bboxes.numel() > 0:
+            bboxes = get_box_tensor(results.bboxes)
+            det_bboxes, keep_idxs = batched_nms(bboxes, results.scores,
+                                                results.labels, cfg.nms)
+            results = results[keep_idxs]
+            # some nms would reweight the score, such as softnms
+            results.scores = det_bboxes[:, -1]
+            results = results[:cfg.max_per_img]
+
+        return results
 
     # def aug_test(self,
     #              aug_batch_feats,

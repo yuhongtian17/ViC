@@ -11,8 +11,8 @@ from .base_det_dataset import BaseDetDataset
 
 
 @DATASETS.register_module()
-class Hep2CocoDataset(BaseDetDataset):
-    """Dataset for HEP2COCO.
+class Hep2SeqDataset(BaseDetDataset):
+    """Dataset for HEP2SEQ.
 
     DO NOT MODIFY: self.load_data_list()
     Modified:      self.parse_data_info(), self.filter_data()
@@ -135,8 +135,8 @@ class Hep2CocoDataset(BaseDetDataset):
         # NEW!
         data_info['n_hit'] = img_info['n_hit']
         data_info['m_eng'] = img_info['m_eng']
-        # data_info['m_phi'] = img_info['m_phi']
-        # data_info['m_the'] = img_info['m_the']
+        data_info['m_phi'] = img_info['m_phi']
+        data_info['m_the'] = img_info['m_the']
         data_info['xyxy'] = img_info['xyxy']
         data_info['m_time'] = img_info['m_time']
 

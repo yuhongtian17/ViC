@@ -1,5 +1,3 @@
-# python ./tools/analysis_tools/hep_eval.py --pkl_path "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/results_ep12.pkl" --json_path "./data/HEP2COCO/bbox_scale_10/Nm_1m__b00000001__e00100000.json" --need_plot 0 --need_excel 0 --need_visual 0
-
 import os
 import argparse
 # from pycocotools.coco import COCO
@@ -10,19 +8,15 @@ from tqdm import tqdm
 
 import numpy as np
 
-import matplotlib
-import matplotlib.pyplot as plt
+# import matplotlib
+# import matplotlib.pyplot as plt
 from openpyxl import Workbook
 from openpyxl.styles import Font
 
 from tools.dataset_converters.root_to_utils import visualization, str_to_numbers
 
 
-# matplotlib.rcParams['font.family'] = 'Times New Roman'
-matplotlib.rcParams["font.size"] = 18
-
-
-class HEP_eval(object):
+class hep_eval(object):
     """
     转化为高能方式的评估
     """
@@ -30,32 +24,32 @@ class HEP_eval(object):
                  pkl_path: str, 
                  json_path: str, 
                  # 
-                 num_classes: int = 2, 
-                 ber_thr: float = 0.0, 
+                 # num_classes: int = 2, 
+                 mmt_min: float = 0.0, 
+                 mmt_max: float = 1.2, 
+                 gt_per_image: int = 1, 
                  # 
-                 output_dir: str = "", 
-                 need_plot: int = 0, 
-                 plot_name: str = "", 
-                 need_excel: int = 1, 
-                 excel_name: str = "", 
+                 need_excel: int = 0, 
+                 excel_path: str = "", 
                  # 
                  need_visual: int = 0, 
+                 visual_path: str = "", 
                  visual_gt_ignore: bool = False, 
                  visual_pred_ignore: bool = False, 
                  ):
         self.pkl_path = pkl_path
         self.json_path = json_path
         # 
-        self.num_classes = num_classes
-        self.ber_thr = ber_thr
+        # self.num_classes = num_classes
+        self.mmt_min = mmt_min
+        self.mmt_max = mmt_max
+        self.gt_per_image = gt_per_image
         # 
-        self.output_dir = output_dir
-        self.need_plot = need_plot
-        self.plot_name = plot_name
         self.need_excel = need_excel
-        self.excel_name = excel_name
+        self.excel_path = excel_path
         # 
         self.need_visual = need_visual
+        self.visual_path = visual_path
         self.visual_gt_ignore = visual_gt_ignore
         self.visual_pred_ignore = visual_pred_ignore
 
@@ -95,6 +89,8 @@ class HEP_eval(object):
                 data_dict['annotations'] += ann_coco_temp['annotations']
             self.ann_coco = data_dict
 
+        self.len_ann_coco = len(self.ann_coco['images'])
+
         # self.ann_coco = COCO(self.json)                                         # 读取json文件
         # self.ann_coco_imgids = self.ann_coco.getImgIds()                        # 读取json文件的imgids列表
         # self.ann_coco_annids = self.ann_coco.getAnnIds()                        # 读取json文件的annids列表
@@ -108,22 +104,22 @@ class HEP_eval(object):
         print("[pickle] : open \"{}\" successfully! time: {}".format(
             self.pkl_path, pickle_t2 - pickle_t1))
 
-        self.eps = 1e-6
-
-        self.all_count    = np.array([self.eps] * self.num_classes)             # 对于每一类，各自有多少gt
-        self.right_count  = np.array([self.eps] * self.num_classes)             # 对于每一类，各自有多少pred预测正确
+        self.len_results_all = len(self.result_all)
 
         self.score_all = []
         self.ab_all = []
-
-        self.efficiency_list = [95.0, 90.0, 80.0, 70.0, 60.0, 50.0, 40.0, 30.0, 20.0, 10.0]
-
         self.mmt_gt_all = []
         self.mmt_pred_all = []
 
-        self.len_mmt_unit = 0.10                                                # 绘制gt-pred图时的单位统计区间长度
-        self.num_mmt_unit = 12
-        self.mmt_max = self.len_mmt_unit * self.num_mmt_unit
+        self.eps = 1e-6
+        self.efficiency_list = [100.0, 95.0, 90.0, 80.0, 70.0, 60.0, 50.0, 40.0, 30.0, 20.0, 10.0]
+
+        self.len_mmt_bin = 0.10                                                 # 绘制gt-pred图时的单位统计区间长度
+        self.num_mmt_bin = int((mmt_max - self.eps) / self.len_mmt_bin + 1)
+
+        print("len_ann_coco: {}; len_results_all: {}".format(self.len_ann_coco, self.len_results_all))
+        print("len_mmt_bin: {}; num_mmt_bin: {}".format(self.len_mmt_bin, self.num_mmt_bin))
+        print()
 
 
     def evaluate_acc_mab_mmt(self):
@@ -131,89 +127,71 @@ class HEP_eval(object):
         sheet = book.active                                                     # 选择或创建一个工作表
         sheet_font = Font(name='Dengxian', size=11, bold=False, italic=False)   # 我们的默认字体
         sheet_col  = ['A', 'B', 'C', 
-                      'D', 'E', 'F', 'G', 'H', 
-                      'I', 
-                      'J', 'K', 
-                      'L', 'M', 'N', 
-                      'O', 'P', 'Q', 'R', 
-                      'S']
+                      'D', 'E', 'F', 'G', 
+                      'H', 'I', 
+                      'J', 'K', 'L', 
+                      'M', 'N', 'O', 'P', 
+                      ]
         sheet_head = ['runid', 'evtid', 'image_id', 
-                      'category_id', 'phi_RM', 'the_RM', 'p_RM', 'ber', 
-                      'pred_score', 
-                      'pred_label', 'flag {0, 1}', 
+                      'gt_label', 'phi_RM', 'the_RM', 'p_RM', 
+                      'pred_score', 'pred_label', 
                       'pred_phi [-pi, pi)', 'pred_the [0, pi)', 'angular_bias [0, 180]', 
                       'pred_mmt', 'absolute_error (GeV/c)', 'relative_error_gt (%)', 'relative_error_pred (%)', 
-                      'pred_ber']
+                      ]
         for i in range(len(sheet_head)):
             sheet[sheet_col[i] + '1'] = sheet_head[i]                           # 写入'A1', 'B1', ...
             sheet[sheet_col[i] + '1'].font = sheet_font                         # 修改字体
 
-        event_i = 0
         sheet_i = 2
 
-        for result_per_event in tqdm(self.result_all):
-            image_h, image_w = result_per_event["img_shape"]
-            image_id = result_per_event["img_id"]
-            pred_scores = result_per_event["pred_instances"]["scores"]          # 以下均已按scores降序排列！
-            pred_labels = result_per_event["pred_instances"]["labels"]
-            pred_bboxes = result_per_event["pred_instances"]["bboxes"]
-            # pred_mmts   = result_per_event["pred_instances"]["mmts"]
-            pred_mmts   = result_per_event["pred_instances"].get("mmts", [[0.0]] * len(pred_bboxes))
-
-            if len(pred_bboxes) == 0:
-                pred_score = self.eps
-                pred_label = 0
-                pred_phi = 0.0
-                pred_the = 0.5 * np.pi
-                pred_mmt = 0.0
-            else:
-                pred_score = float(pred_scores[0])                              # 注意必须强制类型转换，否则写入excel会报错
-                pred_label = int(pred_labels[0])
-                pred_bbox = pred_bboxes[0]                                      # 格式为[xmin, ymin, xmax, ymax]
-                pred_x_ctr = (pred_bbox[0] + pred_bbox[2]) * 0.5
-                pred_y_ctr = (pred_bbox[1] + pred_bbox[3]) * 0.5
-                pred_phi = float(pred_x_ctr / image_w * 2 * np.pi - np.pi)      # phi: [-pi, pi)
-                pred_the = float(pred_y_ctr / image_h * np.pi)                  # the: [0, pi)
-                pred_mmt_raw = pred_mmts[0]
-                pred_mmt = float(pred_mmt_raw[0])
-
+        for event_i in tqdm(range(self.len_ann_coco)):
             # image_id = self.ann_coco_imgids[event_i]                            # pkl文件与json文件的图片顺序一致
             # single_image = self.ann_coco.loadImgs(ids=image_id)[0]              # loadImgs()返回一个list。只需要1张图片
             # ann_id = self.ann_coco.getAnnIds(imgIds=image_id)[0]                # getAnnIds()返回一个list。每张图片只需要1个gt
             # single_gt = self.ann_coco.loadAnns(ids=ann_id)[0]                   # loadAnns()返回一个list。每张图片只需要1个gt
 
             single_image = self.ann_coco['images'][event_i]
-            single_gt = self.ann_coco['annotations'][event_i]
+            single_gt = self.ann_coco['annotations'][event_i * self.gt_per_image]
 
             image_runid = int(single_image['runid'])
             image_evtid = int(single_image["evtid"])
-            assert image_id == int(single_image['id'])
+            image_id = int(single_image['id'])
 
             gt_category = int(single_gt['category_id'])
+            gt_label    = int(gt_category - 1)                                  # 'category_id' 从1开始计数，label从0开始计数
             gt_phi      = float(single_gt["phi_RM"])
             gt_the      = float(single_gt["the_RM"])
             gt_mmt      = float(single_gt['p_RM'])
-            gt_ber      = float(single_gt['ber'])
             assert image_id == int(single_gt['image_id'])
 
-            event_i += 1
-
-            if gt_category > self.num_classes:                                  # e.g. ignore Np or Lmdp
+            # 过滤无效图片
+            if gt_category > 1:
+                # 理论上必定仅保留gt为反中子的图片。检验root_to_json代码与hep_eval代码有无出入
+                print("ERROR! image_id: {}, ann_id: {}".format(single_gt['image_id'], single_gt['id']))
+                continue
+            if gt_mmt < self.mmt_min or gt_mmt > self.mmt_max:
                 continue
 
-            if self.ber_thr > 0 and self.ber_thr > gt_ber:                      # e.g. ignore 0.4 if ber_thr=+0.5
-                continue
-            elif self.ber_thr < 0 and -self.ber_thr < gt_ber:                   # e.g. ignore 0.6 if ber_thr=-0.5
-                continue
-            else:
-                pass
+            # _image_id, pred_score, pred_label, pred_phi, pred_the, pred_mmt = \
+            #     self.result_to_pred(self.result_all[event_i])
+            # assert image_id == _image_id
 
-            gt_label = int(gt_category - 1)                                     # 'category_id' 从1开始计数
+            pred_score = -self.eps
+            pred_label = 0
+            pred_phi = 0.0
+            pred_the = 0.5 * np.pi
+            pred_mmt = -self.eps
 
-            # acc统计
-            (self.all_count)[gt_label] += 1
-            flag = int(pred_label == gt_label)
-            if pred_label == gt_label: (self.right_count)[gt_label] += 1
+            for j in range(self.len_results_all // self.len_ann_coco):
+                _image_id, _pred_score, _pred_label, _pred_phi, _pred_the, _pred_mmt = \
+                    self.result_to_pred(self.result_all[event_i + j * self.len_ann_coco])
+                assert image_id == _image_id
+                if _pred_score > pred_score:
+                    pred_score = _pred_score
+                    pred_label = _pred_label
+                    pred_phi = _pred_phi
+                    pred_the = _pred_the
+                    pred_mmt = _pred_mmt
 
             # mab统计
             angular_bias = self.get_angle(pred_phi, pred_the - 0.5 * np.pi, gt_phi, gt_the - 0.5 * np.pi)
@@ -231,46 +209,18 @@ class HEP_eval(object):
             self.mmt_gt_all.append(gt_mmt)
             self.mmt_pred_all.append(pred_mmt)
 
-            # 额外统计：预测框的bbox energy ratio
-            if len(pred_bboxes) == 0:
-                pred_ber = 0.0
-            else:
-                m_eng_array = np.array(single_image['m_eng'], dtype=float)
-                xyxy_array = np.array(single_image['xyxy'], dtype=float)
-                assert len(m_eng_array) == len(xyxy_array)
-
-                x_ctr_array = np.mean(xyxy_array[:, 0::2], axis=1)
-                y_ctr_array = np.mean(xyxy_array[:, 1::2], axis=1)
-                xmin, ymin, xmax, ymax = pred_bboxes[0]
-                x_ctr_float = float((xmin + xmax) * 0.5)
-                y_ctr_float = float((ymin + ymax) * 0.5)
-                w_ex = float(xmax - xmin)
-                h_ex = float(ymax - ymin)
-
-                x_inbbox = (np.abs(x_ctr_array - x_ctr_float) < w_ex * 0.5)
-                y_inbbox = (np.abs(y_ctr_array - y_ctr_float) < h_ex * 0.5)
-                inbbox = x_inbbox & y_inbbox
-
-                total_eng = np.sum(m_eng_array)
-                bbox_eng = np.sum(m_eng_array[inbbox])
-                pred_ber = float(bbox_eng / total_eng)
-
             row = [image_runid, image_evtid, image_id, 
-                   gt_category, gt_phi, gt_the, gt_mmt, gt_ber, 
-                   pred_score, 
-                   pred_label, flag, 
+                   gt_label, gt_phi, gt_the, gt_mmt, 
+                   pred_score, pred_label, 
                    pred_phi, pred_the, angular_bias, 
                    pred_mmt, absolute_error, relative_error_gt, relative_error_pred, 
-                   pred_ber]
+                   ]
             sheet.append(row)
             for col in sheet_col: sheet[col + str(sheet_i)].font = sheet_font   # 例如image_0对应'A2', 'B2', ...
 
             sheet_i += 1
 
-        acc = self.right_count / self.all_count
-        print()
-        print("raw count:", self.right_count.astype(int).tolist(), self.all_count.astype(int).tolist())
-        print("accuracy:", acc)
+        print("valid count:", sheet_i - 2)
         print()
 
         orig_score_all = np.array(self.score_all)
@@ -293,32 +243,56 @@ class HEP_eval(object):
         orig_mmt_gt_all = np.array(self.mmt_gt_all)
         orig_mmt_pred_all = np.array(self.mmt_pred_all)
 
-        self.get_gt_pred_mean(
-            orig_mmt_gt_all,
-            orig_mmt_pred_all,
-            hint="orig_",
-            marker='^',
-            color='darkred',
-            zorder=3)
+        self.get_gt_pred_mean(orig_mmt_gt_all, orig_mmt_pred_all)
 
         if self.need_excel:
-            output_excel_path = os.path.join(self.output_dir, self.excel_name)
-            book.save(output_excel_path)
+            book.save(self.excel_path)
             book.close()
-            print("[openpyxl] : write to \"{}\" successfully!".format(output_excel_path))
+            print("[openpyxl] : write to \"{}\" successfully!".format(self.excel_path))
 
 
-    def get_gt_pred_mean(self, mmt_gt_array, mmt_pred_array, hint='', **kwargs):
+    def result_to_pred(self, result):
+        image_h, image_w = result["img_shape"]
+        image_id = result["img_id"]
+        pred_scores = result["pred_instances"]["scores"]          # 以下均已按scores降序排列！
+        pred_labels = result["pred_instances"]["labels"]
+        pred_bboxes = result["pred_instances"]["bboxes"]
+        pred_mmts   = result["pred_instances"]["mmts"]            # 要求必须含有动量预测
 
-        # 原先的动量metric
+        if len(pred_labels) == 0:
+            pred_score = -self.eps
+            pred_label = 0
+            pred_phi = 0.0
+            pred_the = 0.5 * np.pi
+            pred_mmt = -self.eps
+        else:
+            if (0 in pred_labels) and (1 in pred_labels):                   # 如果既有反中子又有光子，则过滤光子
+                pred_mask_Nm = (pred_labels == 0)
+                pred_scores = pred_scores[pred_mask_Nm]
+                pred_labels = pred_labels[pred_mask_Nm]
+                pred_bboxes = pred_bboxes[pred_mask_Nm]
+                pred_mmts   = pred_mmts[pred_mask_Nm]
+            pred_score = float(pred_scores[0])                              # 注意必须强制类型转换，否则写入excel会报错
+            pred_label = int(pred_labels[0])
+            pred_bbox = pred_bboxes[0]                                      # 格式为[xmin, ymin, xmax, ymax]
+            pred_x_ctr = (pred_bbox[0] + pred_bbox[2]) * 0.5
+            pred_y_ctr = (pred_bbox[1] + pred_bbox[3]) * 0.5
+            pred_phi = float(pred_x_ctr / image_w * 2 * np.pi - np.pi)      # phi: [-pi, pi)
+            pred_the = float(pred_y_ctr / image_h * np.pi)                  # the: [0, pi)
+            pred_mmt = float(pred_mmts[0, 0])
+
+        return image_id, pred_score, pred_label, pred_phi, pred_the, pred_mmt
+
+
+    def get_gt_pred_mean(self, mmt_gt_array, mmt_pred_array):
         ae = np.abs(mmt_pred_array - mmt_gt_array)
         # re_gt = ae / mmt_gt_array * 100.0
         # re_pred = ae / mmt_pred_array * 100.0
         re_gt = (ae + self.eps) / (mmt_gt_array + self.eps) * 100.0
         re_pred = (ae + self.eps) / (mmt_pred_array + self.eps) * 100.0
-        print("{}mAE: {} GeV/c".format(hint, np.mean(ae)))
-        print("{}mRE_gt: {} %".format(hint, np.mean(re_gt)))
-        print("{}mRE_pred: {} %".format(hint, np.mean(re_pred)))
+        print("mAE: {} GeV/c".format(np.mean(ae)))
+        print("mRE_gt: {} %".format(np.mean(re_gt)))
+        print("mRE_pred: {} %".format(np.mean(re_pred)))
         print()
 
         # 将所有动量真实值和预测值计算它们对应ind
@@ -333,7 +307,7 @@ class HEP_eval(object):
         gbin_pred_mean = []
         gbin_pred_std = []
 
-        for gbin_i in range(self.num_mmt_unit):
+        for gbin_i in range(self.num_mmt_bin):
             mask_gbin_i = (mmt_gt_ind == gbin_i)
             temp_count = np.sum(mask_gbin_i)
             if temp_count == 0: continue
@@ -354,15 +328,6 @@ class HEP_eval(object):
         print("gbin_pred_std  :", gbin_pred_std)
         print()
 
-        if self.need_plot:
-            self.make_plot(
-                np.array(gbin_gt_mean),
-                np.array(gbin_gt_std),
-                np.array(gbin_pred_mean),
-                np.array(gbin_pred_std),
-                "gbin_{}".format(hint),
-                **kwargs)
-
         # 如果以pred_ind为标准
         pbin_count = []
         # 绘制pred-gt图所需的参数。计算各统计区间内的均值、标准差
@@ -371,7 +336,7 @@ class HEP_eval(object):
         pbin_pred_mean = []
         pbin_pred_std = []
 
-        for pbin_i in range(self.num_mmt_unit):
+        for pbin_i in range(self.num_mmt_bin):
             mask_pbin_i = (mmt_pred_ind == pbin_i)
             temp_count = np.sum(mask_pbin_i)
             if temp_count == 0: continue
@@ -392,58 +357,11 @@ class HEP_eval(object):
         print("pbin_pred_std  :", pbin_pred_std)
         print()
 
-        if self.need_plot:
-            self.make_plot(
-                np.array(pbin_gt_mean),
-                np.array(pbin_gt_std),
-                np.array(pbin_pred_mean),
-                np.array(pbin_pred_std),
-                "pbin_{}".format(hint),
-                **kwargs)
-
 
     def get_mmt_ind(self, mmt_array):
-        mmt_ind = np.clip(mmt_array / self.len_mmt_unit, a_min=0, a_max=self.num_mmt_unit - 0.99)
+        mmt_ind = np.clip(mmt_array / self.len_mmt_bin, a_min=0, a_max=self.num_mmt_bin - 0.99)
         mmt_ind = np.array(mmt_ind, dtype=int)
         return mmt_ind
-
-
-    def make_plot(self, gt_mean_np, gt_std_np, pred_mean_np, pred_std_np, hint='', **kwargs):
-
-        # 绘制散点图
-        plt.figure(figsize=(9, 9))
-        plt.scatter(gt_mean_np, pred_mean_np, **kwargs)
-
-        # 绘制十字架线段
-        for i in range(len(gt_mean_np)):
-            plt.plot(
-                [gt_mean_np[i] - gt_std_np[i], gt_mean_np[i] + gt_std_np[i]],
-                [pred_mean_np[i], pred_mean_np[i]],
-                color='black', lw=1)  # 水平线
-            plt.plot(
-                [gt_mean_np[i], gt_mean_np[i]],
-                [pred_mean_np[i] - pred_std_np[i], pred_mean_np[i] + pred_std_np[i]],
-                color='black', lw=1)  # 垂直线
-
-        # 添加y=x的红色虚线
-        plt.plot([0, self.mmt_max], [0, self.mmt_max], 'r--', label="y=x")  # 'r--'表示红色虚线
-
-        # 设置坐标轴范围
-        plt.xlim(0, self.mmt_max)
-        plt.ylim(0, self.mmt_max)
-
-        # plt.tick_params(axis='both', which='major', labelsize=18)
-
-        # 设置轴标签
-        plt.xlabel(r'$p \mathrm{(gt)}$'+' (GeV/c)', fontsize=18)
-        plt.ylabel(r'$p \mathrm{(pred)}$'+' (GeV/c)', fontsize=18)
-
-        # 显示图形
-        plt.grid(True, linestyle='--', alpha=0.5)
-        plt.tight_layout()
-        output_plot_path = os.path.join(self.output_dir, hint + self.plot_name)
-        plt.savefig(output_plot_path, dpi=300)
-        # plt.show()
 
 
     def get_angle(self, phi_1, the_1, phi_2, the_2):
@@ -473,17 +391,18 @@ class HEP_eval(object):
                 single_pred = None if self.visual_pred_ignore else self.result_all[ind]
 
                 single_image = self.ann_coco['images'][ind]
-                single_gt = self.ann_coco['annotations'][ind]
+                single_gt = self.ann_coco['annotations'][ind * self.gt_per_image]
 
+                # TODO: visualization with both Nm and Gamma
                 visualization(
                     single_image = single_image, 
                     single_gt = single_gt, 
                     single_pred = single_pred, 
-                    output_dir = self.output_dir, 
+                    output_dir = self.visual_path, 
                     with_hint = False, 
                 )
 
-            print()
+            if True: print()
 
 
     def main(self):
@@ -496,34 +415,34 @@ if __name__ == '__main__':
     parser.add_argument("--pkl_path", type = str, default = "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/results_ep12.pkl", help = "pkl path")
     parser.add_argument("--json_path", type = str, default = "./data/HEP2COCO/bbox_scale_10/Nm_1m__b00000001__e00100000.json", help = "json path")
     # 
-    parser.add_argument("--num_classes", type = int, default = 2, help = "number of classes")
-    parser.add_argument("--ber_thr", type = float, default = 0.0, help = "bbox energy ratio threshold")
+    # parser.add_argument("--num_classes", type = int, default = 2, help = "")
+    parser.add_argument("--mmt_min", type = float, default = 0.0, help = "")
+    parser.add_argument("--mmt_max", type = float, default = 1.2, help = "")
+    parser.add_argument("--gt_per_image", type = int, default = 1, help = "")
     # 
-    parser.add_argument("--output_dir", type = str, default = "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/", help = "output directory")
-    parser.add_argument("--need_plot", type = int, default = 0, help = "")
-    parser.add_argument("--plot_name", type = str, default = "results_ep12.png", help = "excel filename")
-    parser.add_argument("--need_excel", type = int, default = 1, help = "")
-    parser.add_argument("--excel_name", type = str, default = "results_ep12.xlsx", help = "excel filename")
+    parser.add_argument("--need_excel", type = int, default = 0, help = "")
+    parser.add_argument("--excel_path", type = str, default = "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/results_ep12.xlsx", help = "excel path")
     # 
     parser.add_argument("--need_visual", type = int, default = 0, help = "0: only eval; 1: eval and visual; 2: only visual")
+    parser.add_argument("--visual_path", type = str, default = "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/", help = "visualization output path")
     parser.add_argument("--visual_gt_ignore", type = int, default = 0, help = "whether to ignore gt when visualizing")
     parser.add_argument("--visual_pred_ignore", type = int, default = 0, help = "whether to ignore pred when visualizing")
     opt = parser.parse_args()
 
-    HEP_eval(
+    hep_eval(
         pkl_path = opt.pkl_path, 
         json_path = opt.json_path, 
         # 
-        num_classes = opt.num_classes, 
-        ber_thr = opt.ber_thr, 
+        # num_classes = opt.num_classes, 
+        mmt_min = opt.mmt_min, 
+        mmt_max = opt.mmt_max, 
+        gt_per_image = opt.gt_per_image, 
         # 
-        output_dir = opt.output_dir, 
-        need_plot = opt.need_plot, 
-        plot_name = opt.plot_name, 
         need_excel = opt.need_excel, 
-        excel_name = opt.excel_name, 
+        excel_path = opt.excel_path, 
         # 
         need_visual = opt.need_visual, 
+        visual_path = opt.visual_path, 
         visual_gt_ignore = opt.visual_gt_ignore, 
         visual_pred_ignore = opt.visual_pred_ignore, 
     ).main()
