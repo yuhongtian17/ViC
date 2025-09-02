@@ -14,17 +14,31 @@ from mmdet.models.utils import (filter_scores_and_topk, select_single_mlvl,
 
 from mmdet.models.dense_heads.base_dense_head import BaseDenseHead
 
+from mmcv.cnn import build_norm_layer
+from mmdet.models.backbones.hepv2_transformer import Block
+
+from mmengine.logging import MMLogger
+from mmengine.runner.checkpoint import CheckpointLoader
+
 
 @MODELS.register_module()
-class HEPv2DenseHead(BaseDenseHead):
+class HEPv2DenseTransformerHead(BaseDenseHead):
 
     def __init__(
         self,
         num_classes: int = 2,
         in_channels: int = 768,
         # 
-        num_shared_fcs: int = 2,
-        fc_out_channels: int = 768,
+        embed_dim=384, # 512,
+        depth=8,
+        num_heads=12, # 16,
+        mlp_ratio=4.0,
+        qkv_bias=True,
+        drop_path_rate=0.0,
+        norm_cfg=dict(type='LN', eps=1e-6),
+        act_cfg=dict(type='GELU'),
+        with_cp=False,
+        # 
         phithe_pos_thresh: float = 45.0,
         phithe_base: float = 45.0,
         phithe_mean: float = 0.0,
@@ -38,6 +52,8 @@ class HEPv2DenseHead(BaseDenseHead):
         # 
         len_seq: int = 640,
         use_mmt_token: bool = True,
+        backbone_out_eng=True,
+        backbone_out_phithe=False,
         # 
         loss_cls=dict(
             type='FocalLoss',
@@ -49,16 +65,14 @@ class HEPv2DenseHead(BaseDenseHead):
         loss_mmt_reg=dict(type='L1Loss', loss_weight=1.0),
         train_cfg: OptConfigType = None,
         test_cfg: OptConfigType = None,
-        init_cfg: OptMultiConfig = dict(
-            type='Normal', layer='Conv2d', std=0.01),
+        init_cfg: OptMultiConfig = None,
         **kwargs,
     ):
-        super().__init__(init_cfg=init_cfg)
+        super().__init__()
+        self.init_cfg=init_cfg
 
         self.num_classes = num_classes
         self.in_channels = in_channels
-        self.num_shared_fcs = num_shared_fcs
-        self.fc_out_channels = fc_out_channels
 
         self.use_sigmoid_cls = loss_cls.get('use_sigmoid', False)
         if self.use_sigmoid_cls:
@@ -84,6 +98,8 @@ class HEPv2DenseHead(BaseDenseHead):
 
         self.len_seq = len_seq
         self.use_mmt_token = use_mmt_token
+        self.backbone_out_eng = backbone_out_eng
+        self.backbone_out_phithe = backbone_out_phithe
 
         self.loss_cls = MODELS.build(loss_cls)
         self.loss_phithe_reg = MODELS.build(loss_phithe_reg)
@@ -93,7 +109,18 @@ class HEPv2DenseHead(BaseDenseHead):
         self.test_cfg = test_cfg
 
         self.fp16_enabled = False
-        self._init_layers()
+        self._init_layers(
+            in_channels,
+            embed_dim,
+            depth,
+            num_heads,
+            mlp_ratio,
+            qkv_bias,
+            drop_path_rate,
+            norm_cfg,
+            act_cfg,
+            with_cp,
+        )
 
         self.width = 960
         self.height = 480
@@ -109,39 +136,129 @@ class HEPv2DenseHead(BaseDenseHead):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def _init_layers(self):
-        """Initialize layers of the head."""
-        self.relu = nn.ReLU(inplace=True)
-
-        self.shared_fcs = nn.ModuleList()
-        if self.num_shared_fcs > 0:
-            for i in range(self.num_shared_fcs):
-                fc_in_channels = self.in_channels if i == 0 else self.fc_out_channels
-                self.shared_fcs.append(
-                    nn.Linear(fc_in_channels, self.fc_out_channels))
-            last_layer_dim = self.fc_out_channels
+    def init_weights(self):
+        logger = MMLogger.get_current_instance()
+        if self.init_cfg is None:
+            logger.warn(f'No pre-trained weights for '
+                        f'{self.__class__.__name__}, '
+                        f'training start from scratch')
+            self.apply(self._init_weights)
         else:
-            last_layer_dim = self.in_channels
+            assert 'checkpoint' in self.init_cfg, f'Only support ' \
+                                                  f'specify `Pretrained` in ' \
+                                                  f'`init_cfg` in ' \
+                                                  f'{self.__class__.__name__} '
+            ckpt = CheckpointLoader.load_checkpoint(
+                self.init_cfg.checkpoint, logger=logger, map_location='cpu')
+            if 'model' in ckpt:
+                _state_dict = ckpt['model']
+            elif 'state_dict' in ckpt:
+                _state_dict = ckpt['state_dict']
+            else:
+                _state_dict = ckpt
+            incompatibleKeys = self.load_state_dict(_state_dict, False)
+            print(incompatibleKeys)
 
-        self.dense_cls        = nn.Linear(last_layer_dim, self.cls_out_channels)
-        self.dense_phithe_reg = nn.Linear(last_layer_dim, self.phithe_reg_channels)
-        self.dense_mmt_reg    = nn.Linear(last_layer_dim, self.mmt_reg_channels)
+    def _init_layers(
+        self,
+        in_channels=768,
+        embed_dim=384, # 512,
+        depth=8,
+        num_heads=12, # 16,
+        mlp_ratio=4.0,
+        qkv_bias=True,
+        drop_path_rate=0.0,
+        norm_cfg=dict(type='LN', eps=1e-6),
+        act_cfg=dict(type='GELU'),
+        with_cp=False,
+    ):
+        """Initialize layers of the head."""
+        self.decoder_embed = nn.Linear(in_channels, embed_dim, bias=True)
+
+        if self.backbone_out_eng:
+            self.decoder_embed_eng = nn.Linear(in_channels, embed_dim, bias=True)
+        if self.backbone_out_phithe:
+            self.decoder_embed_phithe = nn.Linear(in_channels, embed_dim, bias=True)
+
+        dpr = [drop_path_rate] * depth  # [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
+
+        self.decoder_blocks = nn.ModuleList([
+            Block(
+                dim=embed_dim,
+                num_heads=num_heads,
+                mlp_ratio=mlp_ratio,
+                qkv_bias=qkv_bias,
+                drop_path=dpr[i],
+                norm_cfg=norm_cfg,
+                act_cfg=act_cfg,
+                with_cp=with_cp,
+            ) for i in range(depth)
+        ])
+
+        self.decoder_norm = build_norm_layer(norm_cfg, embed_dim)[1]
+
+        self.dense_cls        = nn.Linear(embed_dim, self.cls_out_channels)
+        self.dense_phithe_reg = nn.Linear(embed_dim, self.phithe_reg_channels)
+        self.dense_mmt_reg    = nn.Linear(embed_dim, self.mmt_reg_channels)
         self.apply(self._init_weights)
 
     def forward(self, inputs):
-        """ """
-        if not self.use_mmt_token:
-            # 来自HEPv2Transformer: backbone_outs是List[Tensor], 每个Tensor形状为[B, N, C]
-            backbone_outs, backbone_outs_others = inputs
-            feat = backbone_outs[-1]
-            flags = backbone_outs_others['x'][..., 0:1]
-            assert not flags.requires_grad
-        else:
-            feat = inputs[-1]
+        # 来自HEPv2Transformer: backbone_outs是List[Tensor], 每个Tensor形状为[B, N, C]
+        backbone_outs, backbone_outs_others = inputs
 
-        if self.num_shared_fcs > 0:
-            for fc in self.shared_fcs:
-                feat = self.relu(fc(feat))
+        feat = backbone_outs[-1]
+        # assert feat.requires_grad
+        feat = self.decoder_embed(feat)
+        if self.use_mmt_token:
+            feat_main = feat[:, :-1, :]
+            feat_mmt = feat[:, -1:, :]
+        else:
+            feat_main = feat
+
+        backbone_x = backbone_outs_others['x']
+        # assert not backbone_x.requires_grad
+
+        flags = backbone_x[..., 0:1]
+        # x_eng = backbone_x[..., 1]
+        # x_phi = backbone_x[..., 2]
+        # x_the = backbone_x[..., 3]
+        # x_time = backbone_x[..., 4]
+        flags_0 = backbone_x[..., 0]
+
+        B, N, C = feat_main.shape
+
+        if self.backbone_out_eng:
+            y_eng = backbone_outs_others['y_eng']
+            # assert y_eng.requires_grad
+            y_eng = self.decoder_embed_eng(y_eng)
+        else:
+            y_eng = 0.0
+
+        if self.backbone_out_phithe:
+            y_phithe = backbone_outs_others['y_phithe']
+            # assert y_phithe.requires_grad
+            y_phithe = self.decoder_embed_phithe(y_phithe)
+        else:
+            y_phithe = 0.0
+
+        x = feat_main + y_eng + y_phithe
+
+        flags = (flags % self.len_seq + self.eps).to(dtype=torch.long)          # 浮点数改整数以防出错
+        attn_mask_main = (flags != flags.transpose(-2, -1)) * (-1e9)            # B, N, N
+        attn_mask_mmt = (torch.abs(flags_0) < self.eps) * (-1e9)                # B, N
+        if self.use_mmt_token:
+            x = torch.cat([x, feat_mmt], dim=1)                                 # B, N + 1, C
+            attn_mask = torch.zeros(B, N + 1, N + 1, device=x.device, requires_grad=False)
+            attn_mask[:, :-1, :-1] = attn_mask_main
+            attn_mask[:,  -1, :-1] = attn_mask_mmt
+            attn_mask[:, :-1,  -1] = attn_mask_mmt
+        else:
+            attn_mask = attn_mask_main
+
+        for i, blk in enumerate(self.decoder_blocks):
+            x = blk(x, attn_mask)
+
+        feat = self.decoder_norm(x)
 
         if not self.use_mmt_token:
             feat_main = feat

@@ -37,13 +37,13 @@ model = dict(
         recover_eng=False,
         recover_phithe=True,
         # 
-        embed_dim=384,
+        embed_dim=384, # 512,
         depth=8,
-        num_heads=12,
+        num_heads=12, # 16,
         mlp_ratio=4.0,
         qkv_bias=True,
         drop_path_rate=0.0,
-        with_cp=False,
+        with_cp=True,
         # 
         num_classes_eng=12,
         num_classes_phi=24,

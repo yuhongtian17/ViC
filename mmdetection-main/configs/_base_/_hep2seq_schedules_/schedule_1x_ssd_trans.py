@@ -18,7 +18,7 @@ param_scheduler = [
 
 # optimizer
 # lr=1e-4: MSCOCO bs=2*8 <=> HEP2COCO bs=16*8
-# lr=1e-3:               <=> HEP2SEQ  bs=64*8
+# lr=2e-3:               <=> HEP2SEQ  bs=64*8 (verified through experiments)
 optim_wrapper = dict(
     type='OptimWrapper',
     constructor='LayerDecayOptimizerConstructor',
@@ -29,7 +29,7 @@ optim_wrapper = dict(
     },
     optimizer=dict(
         type='AdamW',
-        lr=1e-3,
+        lr=2e-3,
         betas=(0.9, 0.999),
         weight_decay=0.1,
     ))

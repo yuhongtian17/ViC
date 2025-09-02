@@ -1,14 +1,20 @@
 _base_ = [
-    '../../_base_/_hep2seq_models_/hepv2-ssd_trans-base_nofpn.py',
+    '../../_base_/_hep2seq_models_/hepv2-ssd_trans-base_nofpn_trans-head.py',
     '../../_base_/_hep2seq_datasets_/abla/hep2seq-1m_detection.py',
     '../../_base_/_hep2seq_schedules_/schedule_1x_ssd_trans.py', '../../_base_/default_runtime.py'
 ]
 
-pretrained = "work_dirs/hepv2-selfsup-reg_trans-base_nofpn_12e_hep2seq-fullana-top50x_16xbs128_lr4e-3__epoch_12.pth"
+pretrained = "work_dirs/selfsup_50x.pth"
 
 # model settings
 model = dict(
     backbone=dict(
+        init_cfg=dict(
+            _delete_=True,
+            type='Pretrained',
+            checkpoint=pretrained),
+    ),
+    bbox_head=dict(
         init_cfg=dict(
             _delete_=True,
             type='Pretrained',

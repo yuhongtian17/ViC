@@ -360,7 +360,6 @@ class HEPv2Transformer(BaseModule):
                  out_indices=None,
                  init_cfg=None):
         super().__init__()
-
         self.init_cfg = init_cfg
 
         self.token_embed_eng = TokenEmbed_eng(num_embeds_engphithe[0], embed_dim_engphithe[0])
@@ -421,6 +420,10 @@ class HEPv2Transformer(BaseModule):
                 self.init_cfg.checkpoint, logger=logger, map_location='cpu')
             if 'model' in ckpt:
                 _state_dict = ckpt['model']
+            elif 'state_dict' in ckpt:
+                _state_dict = ckpt['state_dict']
+            else:
+                _state_dict = ckpt
             incompatibleKeys = self.load_state_dict(_state_dict, False)
             print(incompatibleKeys)
 

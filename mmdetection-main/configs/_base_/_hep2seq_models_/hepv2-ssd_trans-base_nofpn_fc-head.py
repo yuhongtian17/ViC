@@ -2,7 +2,7 @@ pretrained = None
 
 # model settings
 model = dict(
-    type='HEPv2SelfSupervisor',
+    type='HEPv2SSD',
     data_preprocessor=dict(
         type='HEPv2DataPreprocessor',
     ),
@@ -12,7 +12,7 @@ model = dict(
         embed_dim_engphithe=[768, 384, 384],
         # 
         use_mmt_token=True,
-        out_eng=True,
+        out_eng=False,
         out_phithe=False,
         # 
         embed_dim=768,
@@ -20,33 +20,23 @@ model = dict(
         num_heads=12,
         mlp_ratio=4.0,
         qkv_bias=True,
-        drop_path_rate=0.0,
+        drop_path_rate=0.1,
         with_cp=True,
         # 
         out_indices=None,
         init_cfg=None,
     ),
     neck=None,
-    head=dict(
-        type='HEPv2SelfSupervisorREGHead',
+    bbox_head=dict(
+        type='HEPv2DenseFCHead',
+        num_classes=2,
         in_channels=768,
+        # 
+        num_shared_fcs=2,
+        fc_out_channels=768,
+        phithe_pos_thresh=45.0,
+        phithe_base=45.0,
+        # 
         len_seq=640,
         use_mmt_token=True,
-        backbone_out_eng=True,
-        backbone_out_phithe=False,
-        recover_eng=False,
-        recover_phithe=True,
-        # 
-        embed_dim=384, # 512,
-        depth=8,
-        num_heads=12, # 16,
-        mlp_ratio=4.0,
-        qkv_bias=True,
-        drop_path_rate=0.0,
-        with_cp=True,
-        # 
-        num_classes_eng=12,
-        num_classes_phi=24,
-        num_classes_the=12,
-        init_cfg=None,
     ))

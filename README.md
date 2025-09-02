@@ -117,12 +117,14 @@ unzip BESIII_training_sample.zip
 cd ../
 python ./tools/dataset_converters/root_to_json.py --srcroot "./data/BESIII_training_sample/Nm_1m.root" --df_prefix "Nm_1m" --fn_prefix "Nm_1m"
 
+# ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #
+
 # Prepare ViC's pre-trained model
 mkdir -p "./data/pretrained/"
 cd "./data/pretrained/"
 wget https://github.com/MzeroMiko/vHeat/releases/download/vheatcls/vHeat_tiny.pth
 python ../../vheat_pth_tools/interpolate4downstream.py --pt_pth 'vHeat_tiny.pth' --tg_pth 'vheat_tiny_512.pth'
-cd ../
+cd ../../
 
 # Train ViC
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 PORT=33010 ./tools/dist_train.sh "./configs/_hep2coco_/abla/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco-1m_8xbs16.py" 8
@@ -130,11 +132,24 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 PORT=33010 ./tools/dist_train.sh "./configs
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 PORT=33020 ./tools/dist_test.sh "./configs/_hep2coco_/abla/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco-1m_8xbs16.py" "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco-1m_8xbs16/epoch_12.pth" 4 --out "./work_dirs/results_vic_1m_ep12.pkl"
 python ./tools/analysis_tools/hep_eval.py --pkl_path "./work_dirs/results_vic_1m_ep12.pkl" --json_path "./data/HEP2COCO/Nm_1m/Nm_1m__b00000001__e00100000.json"
 
-# Train LMC (learning from scratch)
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 PORT=33010 ./tools/dist_train.sh "./configs/_hep2seq_/abla_scratch/hepv2-ssd_trans-base_nofpn_1x_hep2seq-1m_8xbs64.py" 8
-# Test LMC
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 PORT=33020 ./tools/dist_test.sh "./configs/_hep2coco_/abla_scratch/hepv2-ssd_trans-base_nofpn_1x_hep2seq-1m_8xbs64.py" "./work_dirs/hepv2-ssd_trans-base_nofpn_1x_hep2seq-1m_8xbs64/epoch_12.pth" 4 --out "./work_dirs/results_lmc_1m_ep12.pkl"
-python ./tools/analysis_tools/hep_eval.py --pkl_path "./work_dirs/results_lmc_1m_ep12.pkl" --json_path "./data/HEP2COCO/Nm_1m/Nm_1m__b00000001__e00100000.json"
+# ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #
+
+# Prepare LMC's pre-trained model
+cd "./data/pretrained/"
+wget https://github.com/yuhongtian17/ViC/releases/download/LMC-checkpoints/selfsup_50x-20250721.pth
+mv selfsup_50x-20250721.pth selfsup_50x.pth
+cd ../../
+
+# Train and test LMC
+model_type="abla"
+model_i="hepv2-ssd_trans-base-selfsup_nofpn_trans-head-selfsup_384c-50x_1x_hep2seq-1m_8xbs64"
+eval_json="./data/HEP2COCO/Nm_1m/Nm_1m__b00000001__e00100000.json"
+
+./tools/dist_train.sh "./configs/_hep2seq_/${model_type}/${model_i}.py" 8
+./tools/dist_test.sh "./configs/_hep2seq_/${model_type}/${model_i}.py" "./work_dirs/${model_i}/epoch_12.pth" 8 --out "./work_dirs/${model_i}/results_lmc_1m_ep12.pkl"
+python ./tools/analysis_tools/hep_eval.py --pkl_path "./work_dirs/${model_i}/results_lmc_1m_ep12.pkl" --json_path "${eval_json}"
+
+# NOTE: Performance with our "LMC_Nm-1m_epoch_12.pth": mAB 9.17° mRE 20.78%
 ```
 
 ## Bugs Report

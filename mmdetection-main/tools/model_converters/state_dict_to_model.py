@@ -1,6 +1,7 @@
-# python ./tools/model_converters/state_dict_to_model.py --destpath "/workspace/all-data/work_dirs/epoch_12_1035_2300_embed.pth" --old_keyword "backbone.token_embedding" --new_keyword "backbone.token_embed" --rename "state_dict"
-# ./tools/dist_test.sh ./configs/_hep2seq_/abla_pretrain/hepv2-ssd_trans-base-mae_nofpn_1x_hep2seq_8xbs128.py ./work_dirs/epoch_12_1035_2300_embed.pth 4 --out ./work_dirs/results_hepv2.pkl
-# python ./tools/analysis_tools/hep_eval.py --pkl_path ./work_dirs/results_hepv2.pkl --json_path ./data/HEP2COCO/Nm_1m/Nm_1m__b00000001__e00100000.json
+# python ./tools/model_converters/state_dict_to_model.py --srcpath "./work_dirs/epoch_12.pth"       --destpath "./work_dirs/epoch_12_temp1.pth" --old_keyword "backbone." --new_keyword ""
+# python ./tools/model_converters/state_dict_to_model.py --srcpath "./work_dirs/epoch_12_temp1.pth" --destpath "./work_dirs/epoch_12_temp2.pth" --old_keyword "head.decoder_embed" --new_keyword "decoder_embed"
+# python ./tools/model_converters/state_dict_to_model.py --srcpath "./work_dirs/epoch_12_temp2.pth" --destpath "./work_dirs/epoch_12_temp3.pth" --old_keyword "head.blocks" --new_keyword "decoder_blocks"
+# python ./tools/model_converters/state_dict_to_model.py --srcpath "./work_dirs/epoch_12_temp3.pth" --destpath "./work_dirs/selfsup_50x.pth"    --old_keyword "head.outnorm7" --new_keyword "decoder_norm"
 
 
 import argparse
@@ -10,9 +11,10 @@ import torch
 def state_dict_to_model(
     srcpath: str,
     destpath: str,
+    old_dict: str,
     old_keyword: str,
+    new_dict: str,
     new_keyword: str,
-    rename: str,
 ):
     len_old_keyword = len(old_keyword)
 
@@ -20,18 +22,18 @@ def state_dict_to_model(
     print("Open file \"{}\" successfully!".format(srcpath))
     destfile = {}
 
-    weights_keys = list(srcfile['state_dict'].keys())
+    weights_keys = list(srcfile[old_dict].keys())
     for weight_name in weights_keys:
         if weight_name[:len_old_keyword] == old_keyword:
             new_weight_name = new_keyword + weight_name[len_old_keyword:]
-            destfile[new_weight_name] = srcfile['state_dict'][weight_name]
+            destfile[new_weight_name] = srcfile[old_dict][weight_name]
             print('{} -> {}'.format(weight_name, new_weight_name))
         else:
-            destfile[weight_name] = srcfile['state_dict'][weight_name]
+            destfile[weight_name] = srcfile[old_dict][weight_name]
 
-    srcfile.pop('state_dict')
-    srcfile[rename] = destfile
-    print('state_dict -> {}'.format(rename))
+    srcfile.pop(old_dict)
+    srcfile[new_dict] = destfile
+    print('{} -> {}'.format(old_dict, new_dict))
 
     torch.save(srcfile, destpath)
     print("Write to \"{}\" successfully!".format(destpath))
@@ -39,17 +41,19 @@ def state_dict_to_model(
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--srcpath", type = str, default = "/workspace/all-data/work_dirs/+hepv2_vit-base_eng768c-211add_nofpn_2fc768c45t45b_1x_hep2seq-rp-cp_bs128x8-lr1e-3/epoch_12.pth", help = "source pth file")
-    parser.add_argument("--destpath", type = str, default = "/workspace/all-data/work_dirs/trained_ep12.pth", help = "destination pth file")
+    parser.add_argument("--srcpath", type = str, default = "./work_dirs/epoch_12.pth", help = "source pth file")
+    parser.add_argument("--destpath", type = str, default = "./work_dirs/selfsup_best50x.pth", help = "destination pth file")
+    parser.add_argument("--old_dict", type = str, default = "state_dict", help = "old state_dict")
     parser.add_argument("--old_keyword", type = str, default = "backbone.", help = "old keyword")
+    parser.add_argument("--new_dict", type = str, default = "state_dict", help = "new state_dict")
     parser.add_argument("--new_keyword", type = str, default = "", help = "new keyword")
-    parser.add_argument("--rename", type = str, default = "model", help = "rename state_dict")
     opt = parser.parse_args()
 
     state_dict_to_model(
         srcpath = opt.srcpath,
         destpath = opt.destpath,
+        old_dict = opt.old_dict,
         old_keyword = opt.old_keyword,
+        new_dict = opt.new_dict,
         new_keyword = opt.new_keyword,
-        rename = opt.rename,
     )

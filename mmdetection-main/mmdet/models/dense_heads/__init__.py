@@ -55,10 +55,13 @@ from .yolox_head import YOLOXHead
 
 from .hep_retina_head import HEPRetinaHead
 from .hep_sf_head import HEPSFHead
-from .hepv2_dense_head import HEPv2DenseHead
+
+from .hepv2_dense_fc_head import HEPv2DenseFCHead
+from .hepv2_dense_trans_head import HEPv2DenseTransformerHead
+from .hepv2_sf_head import HEPv2SFHead
+
 from .hepv2_selfsup_cls_head import HEPv2SelfSupervisorCLSHead
 from .hepv2_selfsup_reg_head import HEPv2SelfSupervisorREGHead
-from .hepv2_sf_head import HEPv2SFHead
 
 __all__ = [
     'AnchorFreeHead', 'AnchorHead', 'GuidedAnchorHead', 'FeatureAdaption',
@@ -79,8 +82,11 @@ __all__ = [
 
     'HEPRetinaHead',
     'HEPSFHead',
-    'HEPv2DenseHead',
+
+    'HEPv2DenseFCHead',
+    'HEPv2DenseTransformerHead',
+    'HEPv2SFHead',
+
     'HEPv2SelfSupervisorCLSHead',
     'HEPv2SelfSupervisorREGHead',
-    'HEPv2SFHead',
 ]

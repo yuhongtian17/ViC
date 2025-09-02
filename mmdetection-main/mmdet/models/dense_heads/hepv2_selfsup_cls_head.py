@@ -21,9 +21,9 @@ class HEPv2SelfSupervisorCLSHead(BaseModule):
         recover_eng=False,
         recover_phithe=True,
         # 
-        embed_dim=384,
+        embed_dim=384, # 512,
         depth=8,
-        num_heads=12,
+        num_heads=12, # 16,
         mlp_ratio=4.0,
         qkv_bias=True,
         drop_path_rate=0.0,
@@ -56,38 +56,37 @@ class HEPv2SelfSupervisorCLSHead(BaseModule):
         self.recover_eng = recover_eng
         self.recover_phithe = recover_phithe
 
-        self.embed_dim = embed_dim
-        self.decoder_embed = nn.Linear(in_channels, self.embed_dim, bias=True)
-        self.mask_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
+        self.decoder_embed = nn.Linear(in_channels, embed_dim, bias=True)
+        self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
 
         if self.backbone_out_eng:
-            self.decoder_embed_eng = nn.Linear(in_channels, self.embed_dim, bias=True)
+            self.decoder_embed_eng = nn.Linear(in_channels, embed_dim, bias=True)
             if self.recover_eng:
-                self.mask_token_eng = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
+                self.mask_token_eng = nn.Parameter(torch.zeros(1, 1, embed_dim))
         if self.backbone_out_phithe:
-            self.decoder_embed_phithe = nn.Linear(in_channels, self.embed_dim, bias=True)
+            self.decoder_embed_phithe = nn.Linear(in_channels, embed_dim, bias=True)
             if self.recover_phithe:
-                self.mask_token_phithe = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
+                self.mask_token_phithe = nn.Parameter(torch.zeros(1, 1, embed_dim))
 
         self.num_classes_eng = num_classes_eng
         self.num_classes_phi = num_classes_phi
         self.num_classes_the = num_classes_the
 
         if self.recover_eng:
-            self.classifier_eng = nn.Linear(self.embed_dim, num_classes_eng, bias=True)
+            self.classifier_eng = nn.Linear(embed_dim, num_classes_eng, bias=True)
             self.loss_eng = MODELS.build(loss_eng)
 
         if self.recover_phithe:
-            self.classifier_phi = nn.Linear(self.embed_dim, num_classes_phi, bias=True)
-            self.classifier_the = nn.Linear(self.embed_dim, num_classes_the, bias=True)
+            self.classifier_phi = nn.Linear(embed_dim, num_classes_phi, bias=True)
+            self.classifier_the = nn.Linear(embed_dim, num_classes_the, bias=True)
             self.loss_phi = MODELS.build(loss_phi)
             self.loss_the = MODELS.build(loss_the)
 
         dpr = [drop_path_rate] * depth  # [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
 
-        self.blocks = nn.ModuleList([
+        self.decoder_blocks = nn.ModuleList([
             Block(
-                dim=self.embed_dim,
+                dim=embed_dim,
                 num_heads=num_heads,
                 mlp_ratio=mlp_ratio,
                 qkv_bias=qkv_bias,
@@ -98,11 +97,7 @@ class HEPv2SelfSupervisorCLSHead(BaseModule):
             ) for i in range(depth)
         ])
 
-        self.out_indices = [depth - 1]
-        for i in self.out_indices:
-            layer = build_norm_layer(norm_cfg, self.embed_dim)[1]
-            layer_name = f'outnorm{i}'
-            self.add_module(layer_name, layer)
+        self.decoder_norm = build_norm_layer(norm_cfg, embed_dim)[1]
 
         self.fp16_enabled = False
         self.apply(self._init_weights)
@@ -122,7 +117,7 @@ class HEPv2SelfSupervisorCLSHead(BaseModule):
         backbone_outs, backbone_outs_others = inputs
 
         feat = backbone_outs[-1]
-        assert feat.requires_grad
+        # assert feat.requires_grad
         feat = self.decoder_embed(feat)
         if self.use_mmt_token:
             feat_main = feat[:, :-1, :]
@@ -131,7 +126,7 @@ class HEPv2SelfSupervisorCLSHead(BaseModule):
             feat_main = feat
 
         backbone_x = backbone_outs_others['x']
-        assert not backbone_x.requires_grad
+        # assert not backbone_x.requires_grad
 
         flags = backbone_x[..., 0:1]
         x_eng = backbone_x[..., 1]
@@ -147,14 +142,14 @@ class HEPv2SelfSupervisorCLSHead(BaseModule):
 
         if self.backbone_out_eng:
             y_eng = backbone_outs_others['y_eng']
-            assert y_eng.requires_grad
+            # assert y_eng.requires_grad
             y_eng = self.decoder_embed_eng(y_eng)
         else:
             y_eng = 0.0
 
         if self.backbone_out_phithe:
             y_phithe = backbone_outs_others['y_phithe']
-            assert y_phithe.requires_grad
+            # assert y_phithe.requires_grad
             y_phithe = self.decoder_embed_phithe(y_phithe)
         else:
             y_phithe = 0.0
@@ -191,27 +186,22 @@ class HEPv2SelfSupervisorCLSHead(BaseModule):
         else:
             attn_mask = attn_mask_main
 
-        outs = []
-        for i, blk in enumerate(self.blocks):
+        for i, blk in enumerate(self.decoder_blocks):
             x = blk(x, attn_mask)
-            if i in self.out_indices:
-                norm_layer = getattr(self, f'outnorm{i}')
-                out = norm_layer(x)
-                outs.append(out)
 
-        xxx = outs[-1]
-        if self.use_mmt_token: xxx = xxx[:, :-1, :]                             # 去掉mmt_token
+        feat = self.decoder_norm(x)
+        if self.use_mmt_token: feat = feat[:, :-1, :]                           # 去掉mmt_token
 
         if self.recover_eng:
-            pred_eng = self.classifier_eng(xxx)
+            pred_eng = self.classifier_eng(feat)
             target_eng = self.eng_to_ind(x_eng, self.num_classes_eng)
         else:
             pred_eng = None
             target_eng = None
 
         if self.recover_phithe:
-            pred_phi = self.classifier_phi(xxx)
-            pred_the = self.classifier_the(xxx)
+            pred_phi = self.classifier_phi(feat)
+            pred_the = self.classifier_the(feat)
             target_phi = self.rad_to_ind(x_phi, self.num_classes_phi, -torch.pi, torch.pi)
             target_the = self.rad_to_ind(x_the, self.num_classes_the, 0, torch.pi)
         else:
