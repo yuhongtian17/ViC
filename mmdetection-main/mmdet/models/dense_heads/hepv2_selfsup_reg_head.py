@@ -196,19 +196,19 @@ class HEPv2SelfSupervisorREGHead(BaseModule):
         for i, blk in enumerate(self.decoder_blocks):
             x = blk(x, attn_mask)
 
-        feat = self.decoder_norm(x)
-        if self.use_mmt_token: feat = feat[:, :-1, :]                           # 去掉mmt_token
+        feat_x = self.decoder_norm(x)
+        if self.use_mmt_token: feat_x = feat_x[:, :-1, :]                       # 去掉mmt_token
 
         if self.recover_eng:
-            pred_eng = self.classifier_eng(feat)
+            pred_eng = self.classifier_eng(feat_x)
             target_eng = self.mmt_encode_base(x_eng + self.eps ** 2)            # 防止log计算出现nan
         else:
             pred_eng = None
             target_eng = None
 
         if self.recover_phithe:
-            pred_phi = self.classifier_phi(feat)
-            pred_the = self.classifier_the(feat)
+            pred_phi = self.classifier_phi(feat_x)
+            pred_the = self.classifier_the(feat_x)
             target_phi = self.phithe_encode_base(x_phi, 0.0)
             target_the = self.phithe_encode_base(x_the, 0.5 * torch.pi)
         else:

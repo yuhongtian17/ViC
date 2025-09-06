@@ -189,19 +189,19 @@ class HEPv2SelfSupervisorCLSHead(BaseModule):
         for i, blk in enumerate(self.decoder_blocks):
             x = blk(x, attn_mask)
 
-        feat = self.decoder_norm(x)
-        if self.use_mmt_token: feat = feat[:, :-1, :]                           # 去掉mmt_token
+        feat_x = self.decoder_norm(x)
+        if self.use_mmt_token: feat_x = feat_x[:, :-1, :]                       # 去掉mmt_token
 
         if self.recover_eng:
-            pred_eng = self.classifier_eng(feat)
+            pred_eng = self.classifier_eng(feat_x)
             target_eng = self.eng_to_ind(x_eng, self.num_classes_eng)
         else:
             pred_eng = None
             target_eng = None
 
         if self.recover_phithe:
-            pred_phi = self.classifier_phi(feat)
-            pred_the = self.classifier_the(feat)
+            pred_phi = self.classifier_phi(feat_x)
+            pred_the = self.classifier_the(feat_x)
             target_phi = self.rad_to_ind(x_phi, self.num_classes_phi, -torch.pi, torch.pi)
             target_the = self.rad_to_ind(x_the, self.num_classes_the, 0, torch.pi)
         else:

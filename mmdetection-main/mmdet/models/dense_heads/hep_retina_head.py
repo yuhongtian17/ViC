@@ -271,12 +271,12 @@ class HEPRetinaHead(AnchorHead):
                          name='retina_cls',
                          std=0.01,
                          bias_prob=0.01)),
-                 mmt_base=1.0,                                                                      # mmt
+                 mmt_min=0.0,                                                                       # mmt
+                 mmt_max=1.2,
+                 mmt_base=1.0,
                  mmt_mean=0.0,
                  mmt_std=1.0,
-                 mmt_min=0.0,
-                 mmt_max=1.2,
-                 encode_sigmoid_mmt=False,
+                 mmt_encode_mode='base',
                  loss_mmt_reg=dict(type='L1Loss', loss_weight=1.0),
                  mmt_use_fpn=False,                                                                 # gloattn
                  mmt_use_gloattn=True,
@@ -300,12 +300,12 @@ class HEPRetinaHead(AnchorHead):
         self.conv_cfg = conv_cfg
         self.norm_cfg = norm_cfg
 
-        self.mmt_base = mmt_base                                                                    # mmt
+        self.mmt_min = mmt_min                                                                      # mmt
+        self.mmt_max = mmt_max
+        self.mmt_base = mmt_base
         self.mmt_mean = mmt_mean
         self.mmt_std = mmt_std
-        self.mmt_min = mmt_min
-        self.mmt_max = mmt_max
-        self.encode_sigmoid_mmt = encode_sigmoid_mmt
+        self.mmt_encode_mode = mmt_encode_mode
         self.use_sigmoid_mmt = loss_mmt_reg.get('use_sigmoid', False)
         self.use_mmt_reg = (loss_mmt_reg is not None)
 
@@ -630,7 +630,13 @@ class HEPRetinaHead(AnchorHead):
 
     def mmt_decode_base(self, mmt_preds) -> Tensor:
         return torch.exp(mmt_preds * self.mmt_std + self.mmt_mean) * self.mmt_base
-    
+
+    def mmt_encode_direct(self, mmt_gts) -> Tensor:
+        return ((mmt_gts - self.mmt_base) - self.mmt_mean) / self.mmt_std
+
+    def mmt_decode_direct(self, mmt_preds) -> Tensor:
+        return (mmt_preds * self.mmt_std + self.mmt_mean) + self.mmt_base
+
     def mmt_encode_sigmoid(self, mmt_gts) -> Tensor:
         mmt_norm = torch.clamp((mmt_gts - self.mmt_min) / (self.mmt_max - self.mmt_min),
                                min = self.eps, max = 1 - self.eps)
@@ -736,10 +742,14 @@ class HEPRetinaHead(AnchorHead):
 
             if self.use_mmt_reg:                                                                    # mmt
                 # 由于loss_mmt_reg无法使用`IouLoss`, `GIouLoss`等损失函数，因此必须对gt预编码而非对pred预解码！
-                if self.encode_sigmoid_mmt:
+                if self.mmt_encode_mode == 'base':
+                    pos_mmt_reg_targets = self.mmt_encode_base(sampling_result.pos_gt_mmt_regs)
+                elif self.mmt_encode_mode == 'direct':
+                    pos_mmt_reg_targets = self.mmt_encode_direct(sampling_result.pos_gt_mmt_regs)
+                elif self.mmt_encode_mode == 'sigmoid':
                     pos_mmt_reg_targets = self.mmt_encode_sigmoid(sampling_result.pos_gt_mmt_regs)
                 else:
-                    pos_mmt_reg_targets = self.mmt_encode_base(sampling_result.pos_gt_mmt_regs)
+                    raise NotImplementedError
                 mmt_reg_targets[pos_inds, :] = pos_mmt_reg_targets
                 mmt_reg_weights[pos_inds, :] = 1.0
 
@@ -948,7 +958,7 @@ class HEPRetinaHead(AnchorHead):
             mmt_reg_pred = mmt_reg_pred.permute(0, 2, 3, 1).reshape(-1, self.mmt_reg_channels)
             # 由于loss_mmt_reg无法使用`IouLoss`, `GIouLoss`等损失函数，因此必须对gt预编码而非对pred预解码！
             # 如果对gt进行了sigmoid预编码、但后续使用L1Loss/L2Loss等而非使用BCELoss，必须也对mmt_reg_pred预编码！
-            if self.encode_sigmoid_mmt and not self.use_sigmoid_mmt:
+            if self.mmt_encode_mode == 'sigmoid' and not self.use_sigmoid_mmt:
                 mmt_reg_pred = torch.sigmoid(mmt_reg_pred)
             loss_mmt_reg = self.loss_mmt_reg(
                 mmt_reg_pred, mmt_reg_targets, mmt_reg_weights, avg_factor=avg_factor)
@@ -1307,10 +1317,14 @@ class HEPRetinaHead(AnchorHead):
         mmt_pred = torch.cat(mlvl_mmt_preds)                                                        # mmt
         if not self.use_mmt_reg:                                                                    # mmt
             mmts = mmt_pred
-        elif self.encode_sigmoid_mmt:
+        elif self.mmt_encode_mode == 'base':
+            mmts = self.mmt_decode_base(mmt_pred)
+        elif self.mmt_encode_mode == 'direct':
+            mmts = self.mmt_decode_direct(mmt_pred)
+        elif self.mmt_encode_mode == 'sigmoid':
             mmts = self.mmt_decode_sigmoid(mmt_pred)
         else:
-            mmts = self.mmt_decode_base(mmt_pred)
+            raise NotImplementedError
 
         results = InstanceData()
         results.bboxes = bboxes

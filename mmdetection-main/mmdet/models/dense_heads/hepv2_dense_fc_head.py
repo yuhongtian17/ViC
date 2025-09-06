@@ -35,6 +35,7 @@ class HEPv2DenseFCHead(BaseDenseHead):
         mmt_base: float = 1.0,
         mmt_mean: float = 0.0,
         mmt_std: float = 1.0,
+        mmt_encode_mode: str = 'base',
         # 
         len_seq: int = 640,
         use_mmt_token: bool = True,
@@ -80,6 +81,8 @@ class HEPv2DenseFCHead(BaseDenseHead):
         self.mmt_base = mmt_base
         self.mmt_mean = mmt_mean
         self.mmt_std = mmt_std
+        self.mmt_encode_mode = mmt_encode_mode
+        self.use_sigmoid_mmt = loss_mmt_reg.get('use_sigmoid', False)
         self.mmt_reg_channels = 1
 
         self.len_seq = len_seq
@@ -132,23 +135,23 @@ class HEPv2DenseFCHead(BaseDenseHead):
         if not self.use_mmt_token:
             # 来自HEPv2Transformer: backbone_outs是List[Tensor], 每个Tensor形状为[B, N, C]
             backbone_outs, backbone_outs_others = inputs
-            feat = backbone_outs[-1]
+            feat_x = backbone_outs[-1]
             flags = backbone_outs_others['x'][..., 0:1]
             assert not flags.requires_grad
         else:
-            feat = inputs[-1]
+            feat_x = inputs[-1]
 
         if self.num_shared_fcs > 0:
             for fc in self.shared_fcs:
-                feat = self.relu(fc(feat))
+                feat_x = self.relu(fc(feat_x))
 
         if not self.use_mmt_token:
-            feat_main = feat
+            feat_main = feat_x
             feat_mask = (flags > self.eps)
-            feat_mmt = (feat * feat_mask).sum(dim=1, keepdim=True) / feat_mask.sum(dim=1, keepdim=True)
+            feat_mmt = (feat_x * feat_mask).sum(dim=1, keepdim=True) / feat_mask.sum(dim=1, keepdim=True)
         else:
-            feat_main = feat[:, :-1, :]
-            feat_mmt = feat[:, -1:, :]
+            feat_main = feat_x[:, :-1, :]
+            feat_mmt = feat_x[:, -1:, :]
 
         N = self.len_seq
 
@@ -161,6 +164,22 @@ class HEPv2DenseFCHead(BaseDenseHead):
         mmt_reg_preds.append(self.dense_mmt_reg(feat_mmt).repeat(1, N, 1))
 
         return cls_scores, phithe_reg_preds, mmt_reg_preds
+
+
+    def mmt_encode_sigmoid(self, mmt_gts) -> torch.Tensor:
+        mmt_norm = torch.clamp((mmt_gts - self.mmt_min) / (self.mmt_max - self.mmt_min),
+                               min = self.eps, max = 1 - self.eps)
+        return mmt_norm
+
+    def mmt_decode_sigmoid(self, mmt_preds) -> torch.Tensor:
+        return torch.sigmoid(mmt_preds) * (self.mmt_max - self.mmt_min) + self.mmt_min
+
+
+    def mmt_encode_direct(self, mmt_gts) -> torch.Tensor:
+        return ((mmt_gts - self.mmt_base) - self.mmt_mean) / self.mmt_std
+
+    def mmt_decode_direct(self, mmt_preds) -> torch.Tensor:
+        return (mmt_preds * self.mmt_std + self.mmt_mean) + self.mmt_base
 
 
     def mmt_encode_base(self, mmt_gts) -> torch.Tensor:
@@ -335,7 +354,14 @@ class HEPv2DenseFCHead(BaseDenseHead):
             # 对gt进行编码
             priors = torch.vstack([anchors_phi_i, anchors_the_i]).transpose(0, 1)
             encoded_phithe = self.phithe_encode_base(gt_phithe_regs, priors)
-            encoded_mmt = self.mmt_encode_base(gt_mmt_regs[0])
+            if self.mmt_encode_mode == 'base':
+                encoded_mmt = self.mmt_encode_base(gt_mmt_regs[0])
+            elif self.mmt_encode_mode == 'direct':
+                encoded_mmt = self.mmt_encode_direct(gt_mmt_regs[0])
+            elif self.mmt_encode_mode == 'sigmoid':
+                encoded_mmt = self.mmt_encode_sigmoid(gt_mmt_regs[0])
+            else:
+                raise NotImplementedError
 
             # 填充进targets和weights
             labels[i, pos_anchors] = gt_labels[0]
@@ -393,6 +419,9 @@ class HEPv2DenseFCHead(BaseDenseHead):
             phithe_reg_pred, phithe_reg_targets, phithe_reg_weights, avg_factor=int(avg_factors[1]))
 
         # mmt loss
+        # 如果对gt进行了sigmoid预编码、但后续使用L1Loss/L2Loss等而非使用BCELoss，必须也对mmt_reg_pred预编码！
+        if self.mmt_encode_mode == 'sigmoid' and not self.use_sigmoid_mmt:
+            mmt_reg_pred = torch.sigmoid(mmt_reg_pred)
         mmt_reg_targets = mmt_reg_targets.reshape(-1, self.mmt_reg_channels)
         mmt_reg_weights = mmt_reg_weights.reshape(-1, self.mmt_reg_channels)
         mmt_reg_pred = mmt_reg_preds[-1].reshape(-1, self.mmt_reg_channels)
@@ -470,7 +499,14 @@ class HEPv2DenseFCHead(BaseDenseHead):
         mmt_reg_pred = mmt_reg_pred[keep_idxs]                                              # shape: 1, 1
 
         bboxes = self.phithe_to_bbox(self.phithe_decode_base(phithe_reg_pred, priors))
-        mmts = self.mmt_decode_base(mmt_reg_pred)
+        if self.mmt_encode_mode == 'base':
+            mmts = self.mmt_decode_base(mmt_reg_pred)
+        elif self.mmt_encode_mode == 'direct':
+            mmts = self.mmt_decode_direct(mmt_reg_pred)
+        elif self.mmt_encode_mode == 'sigmoid':
+            mmts = self.mmt_decode_sigmoid(mmt_reg_pred)
+        else:
+            raise NotImplementedError
 
         assert scores.size(0) == labels.size(0) == bboxes.size(0) == mmts.size(0) == 1
         assert scores.dim() == labels.dim() == 1
