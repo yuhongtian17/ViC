@@ -16,9 +16,8 @@ param_scheduler = [
         gamma=0.1)
 ]
 
-# optimizer
-# lr=1e-4: MSCOCO bs=2*8 <=> HEP2COCO bs=16*8
-# lr=2e-3:               <=> HEP2SEQ  bs=64*8 (verified through experiments)
+# optimizer (verified through experiments)
+# ref: https://github.com/open-mmlab/mmdetection/blob/main/projects/ViTDet/configs/lsj-100e_coco-instance.py
 optim_wrapper = dict(
     type='OptimWrapper',
     constructor='LayerDecayOptimizerConstructor',

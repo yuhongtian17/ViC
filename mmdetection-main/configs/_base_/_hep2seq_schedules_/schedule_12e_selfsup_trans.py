@@ -21,9 +21,8 @@ param_scheduler = [
 ]
 
 # optimizer
-# lr=1e-4: MSCOCO bs=2*8 <=> HEP2COCO bs=16*8
-# lr=1e-3:               <=> HEP2SEQ  bs=64*8
-# lr=4e-3:               <=> HEP2SEQ  bs=128*16
+# ref: https://github.com/open-mmlab/mmdetection/blob/main/projects/ViTDet/configs/lsj-100e_coco-instance.py
+# ref: https://github.com/open-mmlab/mmpretrain/blob/main/configs/mae/mae_vit-base-p16_8xb512-amp-coslr-300e_in1k.py
 optim_wrapper = dict(
     type='OptimWrapper',
     constructor='LayerDecayOptimizerConstructor',

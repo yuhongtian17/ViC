@@ -24,7 +24,17 @@ param_scheduler = [
 # MSCOCO bs=2*8 <=> HEP2COCO bs=16*8
 optim_wrapper = dict(
     type='OptimWrapper',
-    optimizer=dict(type='SGD', lr=1e-2, momentum=0.9, weight_decay=0.0001))
+    paramwise_cfg=dict(
+        custom_keys={
+            'absolute_pos_embed': dict(decay_mult=0.),
+            'relative_position_bias_table': dict(decay_mult=0.),
+            'norm': dict(decay_mult=0.)
+        }),
+    optimizer=dict(
+        type='AdamW',
+        lr=1e-4,
+        betas=(0.9, 0.999),
+        weight_decay=0.05))
 
 # Default setting for scaling LR automatically
 #   - `enable` means enable scaling LR automatically
