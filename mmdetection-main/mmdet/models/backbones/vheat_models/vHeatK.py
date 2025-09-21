@@ -109,8 +109,10 @@ class HeatKBlock(HeatBlock):
             hidden_dim=hidden_dim, 
             **kwargs, 
         )
-        self.op = HeatK2D(res=res, dim=hidden_dim, hidden_dim=hidden_dim, infer_mode=infer_mode, 
-                          feat_fusion_mode=feat_fusion_mode)
+        self.op = HeatK2D(
+            res=res, dim=hidden_dim, hidden_dim=hidden_dim, infer_mode=infer_mode, 
+            feat_fusion_mode=feat_fusion_mode, 
+        )
 
 
 class vHeatK(vHeat):
@@ -143,7 +145,7 @@ class vHeatK(vHeat):
         for d in range(depth):
             blocks.append(HeatKBlock(
                 res=res,
-                hidden_dim=dim, 
+                hidden_dim=dim,
                 drop_path=drop_path[d],
                 norm_layer=norm_layer,
                 use_checkpoint=use_checkpoint,
@@ -156,7 +158,7 @@ class vHeatK(vHeat):
             ))
 
         return AdditionalInputSequential(
-            *blocks, 
+            *blocks,
             downsample,
         )
 

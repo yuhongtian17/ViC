@@ -53,7 +53,7 @@ class Hep2SeqDataset(BaseDetDataset):
                  # limit_num_classes: Union[int, List[int]] = 2,
                  limit_num_classes: int = 2,
                  mmt_min: float = 0.0,
-                 mmt_max: float = 1.2,
+                 mmt_max: float = 2.0,
                  **kwargs) -> None:
         self.limit_num_classes = limit_num_classes  # limitation for num_classes
         self.mmt_min = mmt_min

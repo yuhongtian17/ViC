@@ -34,8 +34,8 @@ class hep_eval(object):
                  # 
                  need_visual: int = 0, 
                  visual_path: str = "", 
-                 visual_gt_ignore: bool = False, 
-                 visual_pred_ignore: bool = False, 
+                 visual_ignore_gt: bool = False, 
+                 visual_ignore_pred: bool = False, 
                  ):
         self.pkl_path = pkl_path
         self.json_path = json_path
@@ -50,8 +50,8 @@ class hep_eval(object):
         # 
         self.need_visual = need_visual
         self.visual_path = visual_path
-        self.visual_gt_ignore = visual_gt_ignore
-        self.visual_pred_ignore = visual_pred_ignore
+        self.visual_ignore_gt = visual_ignore_gt
+        self.visual_ignore_pred = visual_ignore_pred
 
         if self.json_path[-5:] == '.json':
             print("Now loading json ...")
@@ -105,24 +105,22 @@ class hep_eval(object):
             self.pkl_path, pickle_t2 - pickle_t1))
 
         self.len_results_all = len(self.result_all)
+        assert self.len_results_all == self.len_ann_coco                        # 只考虑不使用测试数据增强的情况
 
-        self.score_all = []
-        self.ab_all = []
-        self.mmt_gt_all = []
-        self.mmt_pred_all = []
+        print("len_ann_coco: {}; len_results_all: {}".format(self.len_ann_coco, self.len_results_all))
+        print()
+
+        # ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #
 
         self.eps = 1e-6
         self.efficiency_list = [100.0, 95.0, 90.0, 80.0, 70.0, 60.0, 50.0, 40.0, 30.0, 20.0, 10.0]
 
-        self.len_mmt_bin = 0.10                                                 # 绘制gt-pred图时的单位统计区间长度
-        self.num_mmt_bin = int((mmt_max - self.eps) / self.len_mmt_bin + 1)
-
-        print("len_ann_coco: {}; len_results_all: {}".format(self.len_ann_coco, self.len_results_all))
-        print("len_mmt_bin: {}; num_mmt_bin: {}".format(self.len_mmt_bin, self.num_mmt_bin))
-        print()
+        self.num_phi_bin = 12
+        self.num_the_bin = 12
+        self.num_mmt_bin = 12
 
 
-    def evaluate_acc_mab_mmt(self):
+    def evaluate_mab_mre(self):
         book = Workbook()                                                       # 创建一个新的Excel文件
         sheet = book.active                                                     # 选择或创建一个工作表
         sheet_font = Font(name='Dengxian', size=11, bold=False, italic=False)   # 我们的默认字体
@@ -130,19 +128,26 @@ class hep_eval(object):
                       'D', 'E', 'F', 'G', 
                       'H', 'I', 
                       'J', 'K', 'L', 
-                      'M', 'N', 'O', 'P', 
+                      'M', 'N', 'O', 
                       ]
         sheet_head = ['runid', 'evtid', 'image_id', 
                       'gt_label', 'phi_RM', 'the_RM', 'p_RM', 
                       'pred_score', 'pred_label', 
                       'pred_phi [-pi, pi)', 'pred_the [0, pi)', 'angular_bias [0, 180]', 
-                      'pred_mmt', 'absolute_error (GeV/c)', 'relative_error_gt (%)', 'relative_error_pred (%)', 
+                      'pred_mmt', 'absolute_error (GeV/c)', 'relative_error_gt (%)', 
                       ]
         for i in range(len(sheet_head)):
             sheet[sheet_col[i] + '1'] = sheet_head[i]                           # 写入'A1', 'B1', ...
             sheet[sheet_col[i] + '1'].font = sheet_font                         # 修改字体
 
         sheet_i = 2
+
+        gt_phi_all = []
+        gt_the_all = []
+        gt_mmt_all = []
+        score_all = []
+        ab_all = []
+        re_all = []
 
         for event_i in tqdm(range(self.len_ann_coco)):
             # image_id = self.ann_coco_imgids[event_i]                            # pkl文件与json文件的图片顺序一致
@@ -172,78 +177,84 @@ class hep_eval(object):
             if gt_mmt < self.mmt_min or gt_mmt > self.mmt_max:
                 continue
 
-            # _image_id, pred_score, pred_label, pred_phi, pred_the, pred_mmt = \
-            #     self.result_to_pred(self.result_all[event_i])
-            # assert image_id == _image_id
+            _image_id, pred_score, pred_label, pred_phi, pred_the, pred_mmt = \
+                self.result_to_pred(self.result_all[event_i])
+            assert image_id == _image_id
 
-            pred_score = -self.eps
-            pred_label = 0
-            pred_phi = 0.0
-            pred_the = 0.5 * np.pi
-            pred_mmt = -self.eps
+            # pred_score = -self.eps
+            # pred_label = 0
+            # pred_phi = 0.0
+            # pred_the = 0.5 * np.pi
+            # pred_mmt = -self.eps
 
-            for j in range(self.len_results_all // self.len_ann_coco):
-                _image_id, _pred_score, _pred_label, _pred_phi, _pred_the, _pred_mmt = \
-                    self.result_to_pred(self.result_all[event_i + j * self.len_ann_coco])
-                assert image_id == _image_id
-                if _pred_score > pred_score:
-                    pred_score = _pred_score
-                    pred_label = _pred_label
-                    pred_phi = _pred_phi
-                    pred_the = _pred_the
-                    pred_mmt = _pred_mmt
+            # for j in range(self.len_results_all // self.len_ann_coco):
+            #     _image_id, _pred_score, _pred_label, _pred_phi, _pred_the, _pred_mmt = \
+            #         self.result_to_pred(self.result_all[event_i + j * self.len_ann_coco])
+            #     assert image_id == _image_id
+            #     if _pred_score > pred_score:
+            #         pred_score = _pred_score
+            #         pred_label = _pred_label
+            #         pred_phi = _pred_phi
+            #         pred_the = _pred_the
+            #         pred_mmt = _pred_mmt
 
             # mab统计
             angular_bias = self.get_angle(pred_phi, pred_the - 0.5 * np.pi, gt_phi, gt_the - 0.5 * np.pi)
-
-            self.score_all.append(pred_score)
-            self.ab_all.append(angular_bias)
 
             # mmt统计
             absolute_error = abs(pred_mmt - gt_mmt)
             # relative_error_gt = absolute_error / gt_mmt * 100.0
             # relative_error_pred = absolute_error  / pred_mmt * 100.0
             relative_error_gt = (absolute_error + self.eps) / (gt_mmt + self.eps) * 100.0
-            relative_error_pred = (absolute_error + self.eps) / (pred_mmt + self.eps) * 100.0
+            # relative_error_pred = (absolute_error + self.eps) / (pred_mmt + self.eps) * 100.0
 
-            self.mmt_gt_all.append(gt_mmt)
-            self.mmt_pred_all.append(pred_mmt)
+            gt_phi_all.append(gt_phi)
+            gt_the_all.append(gt_the)
+            gt_mmt_all.append(gt_mmt)
+            score_all.append(pred_score)
+            ab_all.append(angular_bias)
+            re_all.append(relative_error_gt)
 
             row = [image_runid, image_evtid, image_id, 
                    gt_label, gt_phi, gt_the, gt_mmt, 
                    pred_score, pred_label, 
                    pred_phi, pred_the, angular_bias, 
-                   pred_mmt, absolute_error, relative_error_gt, relative_error_pred, 
+                   pred_mmt, absolute_error, relative_error_gt, 
                    ]
             sheet.append(row)
             for col in sheet_col: sheet[col + str(sheet_i)].font = sheet_font   # 例如image_0对应'A2', 'B2', ...
 
             sheet_i += 1
 
-        print("valid count:", sheet_i - 2)
+        num_valid_event = sheet_i - 2
+        print("num valid event:", num_valid_event)
         print()
 
-        orig_score_all = np.array(self.score_all)
-        orig_ab_all = np.array(self.ab_all)
-        print("mean angular_bias:", np.mean(orig_ab_all))
+        np_gt_phi_all = np.array(gt_phi_all)
+        np_gt_the_all = np.array(gt_the_all)
+        np_gt_mmt_all = np.array(gt_mmt_all)
+        np_score_all = np.array(score_all)
+        np_ab_all = np.array(ab_all)
+        np_re_all = np.array(re_all)
+
+        print("mean_angular_bias:", np.mean(np_ab_all))
+        print("mean_relative_error:", np.mean(np_re_all))
+        print()
 
         mab_with_efficiency_list = []
-        num_event = len(orig_score_all)
         for efficiency in self.efficiency_list:
-            num_event_with_efficiency = int(num_event * efficiency / 100.0)
-            indices = np.argsort(orig_score_all)[-num_event_with_efficiency:]
-            mab_with_efficiency = np.mean(orig_ab_all[indices])
+            num_with_efficiency = int(num_valid_event * efficiency / 100.0)     # 计算保留多少事例
+            indices = np.argsort(np_score_all)[-num_with_efficiency:]           # 找到被保留事例的索引
+            mab_with_efficiency = np.mean(np_ab_all[indices])                   # 求平均
             mab_with_efficiency_list.append(mab_with_efficiency)
 
         print("efficiency_list:", self.efficiency_list)
         print("mab_with_efficiency_list:", mab_with_efficiency_list)
         print()
 
-        # 记录所有动量真实值和预测值的列表
-        orig_mmt_gt_all = np.array(self.mmt_gt_all)
-        orig_mmt_pred_all = np.array(self.mmt_pred_all)
-
-        self.get_gt_pred_mean(orig_mmt_gt_all, orig_mmt_pred_all)
+        self.get_bin_mean('phi', -np.pi,       np.pi,        self.num_phi_bin, np_gt_phi_all, np_ab_all, np_re_all)
+        self.get_bin_mean('the', 0,            np.pi,        self.num_the_bin, np_gt_the_all, np_ab_all, np_re_all)
+        self.get_bin_mean('mmt', self.mmt_min, self.mmt_max, self.num_mmt_bin, np_gt_mmt_all, np_ab_all, np_re_all)
 
         if self.need_excel:
             book.save(self.excel_path)
@@ -284,84 +295,25 @@ class hep_eval(object):
         return image_id, pred_score, pred_label, pred_phi, pred_the, pred_mmt
 
 
-    def get_gt_pred_mean(self, mmt_gt_array, mmt_pred_array):
-        ae = np.abs(mmt_pred_array - mmt_gt_array)
-        # re_gt = ae / mmt_gt_array * 100.0
-        # re_pred = ae / mmt_pred_array * 100.0
-        re_gt = (ae + self.eps) / (mmt_gt_array + self.eps) * 100.0
-        re_pred = (ae + self.eps) / (mmt_pred_array + self.eps) * 100.0
-        print("mAE: {} GeV/c".format(np.mean(ae)))
-        print("mRE_gt: {} %".format(np.mean(re_gt)))
-        print("mRE_pred: {} %".format(np.mean(re_pred)))
+    def get_bin_mean(self, hint, gt_min, gt_max, num_bin, gt_array, ab_array, re_array):
+        len_bin = (gt_max - gt_min) / num_bin
+        num_with_bin_list = []
+        mab_with_bin_list = []
+        mre_with_bin_list = []
+        for i in range(num_bin):
+            bin_min = i * len_bin + gt_min
+            bin_max = (i + 1) * len_bin + gt_min
+            bin_mask = (gt_array >= bin_min) & (gt_array < bin_max)
+
+            num_with_bin_list.append(int(np.sum(bin_mask)))
+            mab_with_bin_list.append(np.mean(ab_array[bin_mask]))
+            mre_with_bin_list.append(np.mean(re_array[bin_mask]))
+
+        print("{}: min {}, max {}, num {}".format(hint, gt_min, gt_max, num_bin))
+        print("num_with_bin_list:", num_with_bin_list)
+        print("mab_with_bin_list:", mab_with_bin_list)
+        print("mre_with_bin_list:", mre_with_bin_list)
         print()
-
-        # 将所有动量真实值和预测值计算它们对应ind
-        mmt_gt_ind = self.get_mmt_ind(mmt_gt_array)
-        mmt_pred_ind = self.get_mmt_ind(mmt_pred_array)
-
-        # 如果以gt_ind为标准
-        gbin_count = []
-        # 绘制pred-gt图所需的参数。计算各统计区间内的均值、标准差
-        gbin_gt_mean = []
-        gbin_gt_std = []
-        gbin_pred_mean = []
-        gbin_pred_std = []
-
-        for gbin_i in range(self.num_mmt_bin):
-            mask_gbin_i = (mmt_gt_ind == gbin_i)
-            temp_count = np.sum(mask_gbin_i)
-            if temp_count == 0: continue
-
-            temp_gt = mmt_gt_array[mask_gbin_i]
-            temp_pred = mmt_pred_array[mask_gbin_i]
-
-            gbin_count.append(temp_count)
-            gbin_gt_mean.append(np.mean(temp_gt))
-            gbin_gt_std.append(np.std(temp_gt))
-            gbin_pred_mean.append(np.mean(temp_pred))
-            gbin_pred_std.append(np.std(temp_pred))
-
-        print("gbin_count     :", gbin_count)
-        print("gbin_gt_mean   :", gbin_gt_mean)
-        print("gbin_gt_std    :", gbin_gt_std)
-        print("gbin_pred_mean :", gbin_pred_mean)
-        print("gbin_pred_std  :", gbin_pred_std)
-        print()
-
-        # 如果以pred_ind为标准
-        pbin_count = []
-        # 绘制pred-gt图所需的参数。计算各统计区间内的均值、标准差
-        pbin_gt_mean = []
-        pbin_gt_std = []
-        pbin_pred_mean = []
-        pbin_pred_std = []
-
-        for pbin_i in range(self.num_mmt_bin):
-            mask_pbin_i = (mmt_pred_ind == pbin_i)
-            temp_count = np.sum(mask_pbin_i)
-            if temp_count == 0: continue
-
-            temp_gt = mmt_gt_array[mask_pbin_i]
-            temp_pred = mmt_pred_array[mask_pbin_i]
-
-            pbin_count.append(temp_count)
-            pbin_gt_mean.append(np.mean(temp_gt))
-            pbin_gt_std.append(np.std(temp_gt))
-            pbin_pred_mean.append(np.mean(temp_pred))
-            pbin_pred_std.append(np.std(temp_pred))
-
-        print("pbin_count     :", pbin_count)
-        print("pbin_gt_mean   :", pbin_gt_mean)
-        print("pbin_gt_std    :", pbin_gt_std)
-        print("pbin_pred_mean :", pbin_pred_mean)
-        print("pbin_pred_std  :", pbin_pred_std)
-        print()
-
-
-    def get_mmt_ind(self, mmt_array):
-        mmt_ind = np.clip(mmt_array / self.len_mmt_bin, a_min=0, a_max=self.num_mmt_bin - 0.99)
-        mmt_ind = np.array(mmt_ind, dtype=int)
-        return mmt_ind
 
 
     def get_angle(self, phi_1, the_1, phi_2, the_2):
@@ -388,7 +340,7 @@ class hep_eval(object):
 
             for image_id in tqdm(image_id_list):
                 ind = image_id - 1
-                single_pred = None if self.visual_pred_ignore else self.result_all[ind]
+                single_pred = None if self.visual_ignore_pred else self.result_all[ind]
 
                 single_image = self.ann_coco['images'][ind]
                 single_gt = self.ann_coco['annotations'][ind * self.gt_per_image]
@@ -406,7 +358,7 @@ class hep_eval(object):
 
 
     def main(self):
-        if self.need_visual <= 1: self.evaluate_acc_mab_mmt()
+        if self.need_visual <= 1: self.evaluate_mab_mre()
         if self.need_visual >= 1: self.visual()
 
 
@@ -425,8 +377,8 @@ if __name__ == '__main__':
     # 
     parser.add_argument("--need_visual", type = int, default = 0, help = "0: only eval; 1: eval and visual; 2: only visual")
     parser.add_argument("--visual_path", type = str, default = "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/", help = "visualization output path")
-    parser.add_argument("--visual_gt_ignore", type = int, default = 0, help = "whether to ignore gt when visualizing")
-    parser.add_argument("--visual_pred_ignore", type = int, default = 0, help = "whether to ignore pred when visualizing")
+    parser.add_argument("--visual_ignore_gt", type = int, default = 0, help = "whether to ignore gt when visualizing")
+    parser.add_argument("--visual_ignore_pred", type = int, default = 0, help = "whether to ignore pred when visualizing")
     opt = parser.parse_args()
 
     hep_eval(
@@ -443,7 +395,7 @@ if __name__ == '__main__':
         # 
         need_visual = opt.need_visual, 
         visual_path = opt.visual_path, 
-        visual_gt_ignore = opt.visual_gt_ignore, 
-        visual_pred_ignore = opt.visual_pred_ignore, 
+        visual_ignore_gt = opt.visual_ignore_gt, 
+        visual_ignore_pred = opt.visual_ignore_pred, 
     ).main()
 
