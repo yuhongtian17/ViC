@@ -1,4 +1,4 @@
-# Vision Calorimeter (ViC) and Language Modeling Calorimeter (LMC)
+# Vision Calorimeter (ViC) and Anti-Neutron Transformer (ANT)
 
 <p align="left">
 <a href="https://arxiv.org/abs/2408.10599v2"><img src="https://img.shields.io/badge/arXiv-Paper-<color>"></a>
@@ -6,32 +6,32 @@
 
 ## Abstract
 
-<div align=center><img src="./figures/figure_1_v12.png"></div>
+<div align=center><img src="./figures/vic_figure_1.png"></div>
 
-In high-energy physics, accurately estimating the kinematic parameters (position and momentum) of anti-neutrons ($\bar{n}$) is essential for exploring the fundamental governing principles.
-However, this process is particularly challenging when using an electromagnetic calorimeter (EMC) as the energy detector, due to their limited accuracy and efficiency in interacting with $\bar{n}$.
+In the field of high-energy physics, accurately estimating the kinematic parameters (position and momentum) of anti-neutrons ($\bar{n}$) is crucial for exploring the fundamental governing principles.
+However, this process is particularly challenging with discrete and scattered energy information when using an electromagnetic calorimeter (EMC) as the detector.
 To address this issue, we propose Vision Calorimeter (ViC), a data-driven framework which migrates visual object detection techniques to high-energy particle images.
-To accommodate the unique characteristics of particle images, we introduce the heat-conduction operator (HCO) into both the backbone and the head of the conventional object detector and conduct significant structural improvements.
-HCO enjoys the advantage of both radial prior and global attention, as it is inspired by physical heat conduction which naturally aligns with the pattern of particle incidence.
-Implemented via the Discrete Cosine Transform (DCT), HCO extracts frequency-domain features, bridging the distribution gap between the particle images and the natural images on which visual object detectors are pre-trained.
-Experimental results demonstrate that ViC significantly outperforms traditional approaches, reducing the incident position prediction error by 46.16\% (from $17.31^{\circ}$ to $9.32^{\circ}$) and providing the first baseline result with an incident momentum regression error of 21.48\%.
-This study underscores ViC's great potential as a general-purpose particle parameter estimator in high-energy physics. Code is available at https://github.com/yuhongtian17/ViC.
+To accommodate the unique characteristics of particle images, we introduce the heat-conduction operator (HCO) into the backbone and the head of conventional object detector, along with significant structural improvements.
+HCO enjoys advantages of both radial prior and global attention, as it is inspired by physical heat conduction which naturally aligns with the pattern of particle incidence.
+Implemented via the Discrete Cosine Transform (DCT), HCO extracts frequency-domain features, bridging the distribution gap between particle images and natural images where visual object detectors are pre-trained.
+Experiments demonstrate that ViC significantly outperforms conventional approaches, reducing the incident position prediction error by 46.16\% (from 17.31° to 9.32°) and providing the first baseline result with an incident momentum regression error of 21.48\%.
+This study underscores ViC's great potential as a general-purpose particle parameter estimator for high-energy physics.
+Code is available at https://github.com/yuhongtian17/ViC.
 
-Full paper is available at https://arxiv.org/abs/2408.10599v2.
+Full paper is available at https://arxiv.org/pdf/2408.10599v2.
 
-<div align=center><img src="./figures/figure_2_v3.png"></div>
+<div align=center><img src="./figures/ant_figure_2.png"></div>
 
-<div align=center><img src="./figures/figure_3_v2.png"></div>
-
-In high-energy particle physics, anti-neutron ($\bar{n}$) serves as an important probe for studying fundamental units of the material world.
-Due to the discreteness and sparsity of data, it is challenging to measure the $\bar{n}$ features using machine learning algorithms.
-Recent studies have tackled the $\bar{n}$ detection problem using computer vision techniques, which, however, are puzzled by representation redundancy and model generalizability when handling discrete and sparse detector readouts.
-In this study, we propose the Language Modeling Calorimeter (LMC), by re-formulating the high-energy anti-neutron detection problem with language modeling.
-The motivation lies in that such models enjoy not only serialized representation consistent with discrete deposition patterns of $\bar{n}$ but also higher information density applicable to sparse data.
-LMC treats each $\bar{n}$ event as a "sentence" and each deposited energy point as a "word", constructing a token sequence for a Transformer model.
+In the field of high-energy particle physics, anti-neutron ($\bar{n}$) serves as an important probe for studying fundamental units of the material world.
+Due to the discrete and sparse nature of data, it is challenging to measure the $\bar{n}$ features using machine learning algorithms.
+Recent studies have tackled the $\bar{n}$ detection problem using computer vision techniques, which, however, are puzzled by representation redundancy and model generalizability when processing discrete and sparse detector readouts.
+In this study, we propose the Anti‑Neutron Transformer (ANT), by handling the high-energy detection problem with inspiration from language processing.
+The motivation lies in the fact that Transformer models enjoy not only serialized representation consistent with discrete deposition patterns of $\bar{n}$ but also higher information density applicable to sparse data.
+We treat each $\bar{n}$ event as a "sentence" and each deposited energy point as a "word", constructing a token sequence for a Transformer model.
 The energy points also serve as spatial "anchors" for prediction, enabling the model to learn their correlations with the incident position and momentum of $\bar{n}$.
-LMC undergoes extensive pre-training on quantities of unlabeled $\bar{n}$ events to recover masked position values, providing underlying prior knowledge about spatial radiation patterns of energy.
-Experiments upon high-energy particle data show that LMC achieves state-of-the-art performance, while outperforms visual detectors in terms of statistical analysis and physical application. Code is available at https://github.com/yuhongtian17/ViC.
+ANT undergoes extensive pre-training on quantities of unlabeled $\bar{n}$ events to recover masked position values, providing underlying prior knowledge about spatial radiation patterns of energy.
+Experiments on high-energy particle data show that ANT achieves state-of-the-art performance, while outperforming visual detectors in terms of statistical analysis and physical application.
+Code is available at https://github.com/yuhongtian17/ViC.
 
 Full paper is coming soon.
 
@@ -134,22 +134,22 @@ python ./tools/analysis_tools/hep_eval.py --pkl_path "./work_dirs/results_vic_1m
 
 # ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #
 
-# Prepare LMC's pre-trained model
+# Prepare ANT's pre-trained model
 cd "./data/pretrained/"
-wget https://github.com/yuhongtian17/ViC/releases/download/LMC-checkpoints/selfsup_50x-20250721.pth
+wget https://github.com/yuhongtian17/ViC/releases/download/ANT-checkpoints/selfsup_50x-20250721.pth
 mv selfsup_50x-20250721.pth selfsup_50x.pth
 cd ../../
 
-# Train and test LMC
+# Train and test ANT
 model_type="abla"
 model_i="hepv2-ssd_trans-base-selfsup_nofpn_trans-head-selfsup_384c-50x_1x_hep2seq-1m_8xbs64"
 eval_json="./data/HEP2COCO/Nm_1m/Nm_1m__b00000001__e00100000.json"
 
 ./tools/dist_train.sh "./configs/_hep2seq_/${model_type}/${model_i}.py" 8
-./tools/dist_test.sh "./configs/_hep2seq_/${model_type}/${model_i}.py" "./work_dirs/${model_i}/epoch_12.pth" 8 --out "./work_dirs/${model_i}/results_lmc_1m_ep12.pkl"
-python ./tools/analysis_tools/hep_eval.py --pkl_path "./work_dirs/${model_i}/results_lmc_1m_ep12.pkl" --json_path "${eval_json}"
+./tools/dist_test.sh "./configs/_hep2seq_/${model_type}/${model_i}.py" "./work_dirs/${model_i}/epoch_12.pth" 8 --out "./work_dirs/${model_i}/results_ant_1m_ep12.pkl"
+python ./tools/analysis_tools/hep_eval.py --pkl_path "./work_dirs/${model_i}/results_ant_1m_ep12.pkl" --json_path "${eval_json}"
 
-# NOTE: Performance with our "LMC_Nm-1m_epoch_12.pth": mAB 9.17° mRE 20.78%
+# NOTE: Performance with our "ANT_Nm-1m_epoch_12.pth": mAB 9.17° mRE 20.78%
 ```
 
 ## Bugs Report
@@ -161,7 +161,7 @@ sudo apt update
 sudo apt install libgl1-mesa-glx
 ```
 
-(2) An error may occur on the RTX 4090 server when training LMC: "RuntimeError: received 0 items of ancdata". It can be solved by the following shell command:
+(2) An error may occur on the RTX 4090 server when training ANT: "RuntimeError: received 0 items of ancdata". It can be solved by the following shell command:
 
 ```shell
 echo "ulimit -n 1048576" >> ~/.bashrc
