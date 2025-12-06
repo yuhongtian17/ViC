@@ -50,7 +50,7 @@ model = dict(
             alpha=0.25,
             loss_weight=1.0),
         loss_bbox=dict(type='L1Loss', loss_weight=1.0),
-        # mmt
+        # 
         mmt_min=0.0,
         mmt_max=1.2,
         mmt_base=1.0,
@@ -58,6 +58,11 @@ model = dict(
         mmt_std=1.0,
         mmt_encode_mode='base',
         loss_mmt_reg=dict(type='L1Loss', loss_weight=1.0),
+        mmt_reg_channels=1,
+        # 
+        loss_mmt_label=None,
+        mmt_label_channels=12,
+        # 
         mmt_use_fpn=False,
         mmt_use_gloattn=True,
         mmt_in_channels=768,

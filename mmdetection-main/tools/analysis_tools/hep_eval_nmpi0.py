@@ -25,9 +25,9 @@ class hep_eval(object):
                  json_path: str, 
                  # 
                  # num_classes: int = 2, 
-                 mmt_min: float = 0.0, 
-                 mmt_max: float = 1.2, 
-                 gt_per_image: int = 1, 
+                 mmt_min: float = 0.2, 
+                 mmt_max: float = 1.4, 
+                 # gt_per_image: int = 3, 
                  # 
                  need_excel: int = 0, 
                  excel_path: str = "", 
@@ -43,7 +43,7 @@ class hep_eval(object):
         # self.num_classes = num_classes
         self.mmt_min = mmt_min
         self.mmt_max = mmt_max
-        self.gt_per_image = gt_per_image
+        # self.gt_per_image = gt_per_image
         # 
         self.need_excel = need_excel
         self.excel_path = excel_path
@@ -149,6 +149,13 @@ class hep_eval(object):
         ab_all = []
         re_all = []
 
+        score_gam = []
+        ab_gam = []
+        re_gam = []
+
+        pred_num_list = []
+        pred_num_Nm_list = []
+
         for event_i in tqdm(range(self.len_ann_coco)):
             # image_id = self.ann_coco_imgids[event_i]                            # pkl文件与json文件的图片顺序一致
             # single_image = self.ann_coco.loadImgs(ids=image_id)[0]              # loadImgs()返回一个list。只需要1张图片
@@ -156,7 +163,7 @@ class hep_eval(object):
             # single_gt = self.ann_coco.loadAnns(ids=ann_id)[0]                   # loadAnns()返回一个list。每张图片只需要1个gt
 
             single_image = self.ann_coco['images'][event_i]
-            single_gt = self.ann_coco['annotations'][event_i * self.gt_per_image]
+            single_gt = self.ann_coco['annotations'][event_i * 3]               # 固定有1个反中子和2个光子
 
             image_runid = int(single_image.get('runid', -1))
             image_evtid = int(single_image.get('evtid', -1))
@@ -169,11 +176,40 @@ class hep_eval(object):
             assert gt_category == 1                                             # 检验root_to_json代码与hep_eval代码有无出入
             assert image_id == int(single_gt['image_id'])
 
+            # ##### ##### ##### ##### ##### Gamma1 ##### ##### ##### ##### ##### #
+
+            single_gt_gam1 = self.ann_coco['annotations'][event_i * 3 + 1]
+
+            gt_category_gam1 = int(single_gt_gam1['category_id'])
+            gt_phi_gam1      = float(single_gt_gam1["phi_RM"])
+            gt_the_gam1      = float(single_gt_gam1["the_RM"])
+            gt_mmt_gam1      = float(single_gt_gam1['p_RM'])
+            assert gt_category_gam1 == 2
+            assert image_id == int(single_gt_gam1['image_id'])
+
+            # ##### ##### ##### ##### ##### Gamma2 ##### ##### ##### ##### ##### #
+
+            single_gt_gam2 = self.ann_coco['annotations'][event_i * 3 + 2]
+
+            gt_category_gam2 = int(single_gt_gam2['category_id'])
+            gt_phi_gam2      = float(single_gt_gam2["phi_RM"])
+            gt_the_gam2      = float(single_gt_gam2["the_RM"])
+            gt_mmt_gam2      = float(single_gt_gam2['p_RM'])
+            assert gt_category_gam2 == 2
+            assert image_id == int(single_gt_gam2['image_id'])
+
             # 过滤无效图片
             if gt_mmt < self.mmt_min or gt_mmt > self.mmt_max:
                 continue
+            if gt_mmt_gam1 < self.mmt_min or gt_mmt_gam1 > self.mmt_max:
+                continue
+            if gt_mmt_gam2 < self.mmt_min or gt_mmt_gam2 > self.mmt_max:
+                continue
 
-            (_image_id, pred_score, pred_label, pred_phi, pred_the, pred_mmt) = \
+            (_image_id, pred_score, pred_label, pred_phi, pred_the, pred_mmt,
+             pred_score_gam1, pred_label_gam1, pred_phi_gam1, pred_the_gam1, pred_mmt_gam1,
+             pred_score_gam2, pred_label_gam2, pred_phi_gam2, pred_the_gam2, pred_mmt_gam2,
+             pred_num, pred_num_Nm) = \
                 self.result_to_pred(self.result_all[event_i])
             assert image_id == _image_id
 
@@ -205,7 +241,63 @@ class hep_eval(object):
 
             sheet_i += 1
 
-        num_valid_event = sheet_i - 2
+            # 双光子交叉匹配
+            angular_bias_11 = self.get_angle(pred_phi_gam1, pred_the_gam1 - 0.5 * np.pi, gt_phi_gam1, gt_the_gam1 - 0.5 * np.pi)
+            angular_bias_22 = self.get_angle(pred_phi_gam2, pred_the_gam2 - 0.5 * np.pi, gt_phi_gam2, gt_the_gam2 - 0.5 * np.pi)
+            angular_bias_12 = self.get_angle(pred_phi_gam1, pred_the_gam1 - 0.5 * np.pi, gt_phi_gam2, gt_the_gam2 - 0.5 * np.pi)
+            angular_bias_21 = self.get_angle(pred_phi_gam2, pred_the_gam2 - 0.5 * np.pi, gt_phi_gam1, gt_the_gam1 - 0.5 * np.pi)
+            if angular_bias_12 + angular_bias_21 < angular_bias_11 + angular_bias_22:
+                pred_score_gam_, pred_label_gam_, pred_phi_gam_, pred_the_gam_, pred_mmt_gam_ = pred_score_gam1, pred_label_gam1, pred_phi_gam1, pred_the_gam1, pred_mmt_gam1
+                pred_score_gam1, pred_label_gam1, pred_phi_gam1, pred_the_gam1, pred_mmt_gam1 = pred_score_gam2, pred_label_gam2, pred_phi_gam2, pred_the_gam2, pred_mmt_gam2
+                pred_score_gam2, pred_label_gam2, pred_phi_gam2, pred_the_gam2, pred_mmt_gam2 = pred_score_gam_, pred_label_gam_, pred_phi_gam_, pred_the_gam_, pred_mmt_gam_
+
+                angular_bias_11 = angular_bias_21
+                angular_bias_22 = angular_bias_12
+
+            absolute_error_11 = abs(pred_mmt_gam1 - gt_mmt_gam1)
+            relative_error_11 = (absolute_error_11 + self.eps) / (gt_mmt_gam1 + self.eps) * 100.0
+            absolute_error_22 = abs(pred_mmt_gam2 - gt_mmt_gam2)
+            relative_error_22 = (absolute_error_22 + self.eps) / (gt_mmt_gam2 + self.eps) * 100.0
+
+            score_gam.append(pred_score_gam1)
+            ab_gam.append(angular_bias_11)
+            re_gam.append(relative_error_11)
+
+            score_gam.append(pred_score_gam2)
+            ab_gam.append(angular_bias_22)
+            re_gam.append(relative_error_22)
+
+            pred_num_list.append(pred_num)
+            pred_num_Nm_list.append(pred_num_Nm)
+
+            # ##### ##### ##### ##### ##### Gamma1 ##### ##### ##### ##### ##### #
+
+            row = [image_runid, image_evtid, image_id, 
+                   gt_category_gam1 - 1, gt_phi_gam1, gt_the_gam1, gt_mmt_gam1, 
+                   pred_score_gam1, pred_label_gam1, 
+                   pred_phi_gam1, pred_the_gam1, angular_bias_11, 
+                   pred_mmt_gam1, absolute_error_11, relative_error_11, 
+                   ]
+            sheet.append(row)
+            for col in sheet_col: sheet[col + str(sheet_i)].font = sheet_font   # 例如image_0对应'A2', 'B2', ...
+
+            sheet_i += 1
+
+            # ##### ##### ##### ##### ##### Gamma2 ##### ##### ##### ##### ##### #
+
+            row = [image_runid, image_evtid, image_id, 
+                   gt_category_gam2 - 1, gt_phi_gam2, gt_the_gam2, gt_mmt_gam2, 
+                   pred_score_gam2, pred_label_gam2, 
+                   pred_phi_gam2, pred_the_gam2, angular_bias_22, 
+                   pred_mmt_gam2, absolute_error_22, relative_error_22, 
+                   ]
+            sheet.append(row)
+            for col in sheet_col: sheet[col + str(sheet_i)].font = sheet_font   # 例如image_0对应'A2', 'B2', ...
+
+            sheet_i += 1
+            # 双光子交叉匹配 END
+
+        num_valid_event = (sheet_i - 2) // 3                                    # 固定有1个反中子和2个光子
         print("num valid event:", num_valid_event)
         print()
 
@@ -231,6 +323,46 @@ class hep_eval(object):
         print("mab_with_efficiency_list:", mab_with_efficiency_list)
         print()
 
+        # 光子测量
+        print("# ##### ##### ##### ##### ##### Gamma ##### ##### ##### ##### ##### #")
+        print()
+
+        np_score_gam = np.array(score_gam)
+        np_ab_gam = np.array(ab_gam)
+        np_re_gam = np.array(re_gam)
+
+        print("mean_angular_bias:", np.mean(np_ab_gam))
+        print("mean_relative_error:", np.mean(np_re_gam))
+        print()
+
+        mab_with_efficiency_list = []
+        for efficiency in self.efficiency_list:
+            num_with_efficiency = int(2 * num_valid_event * efficiency / 100.0)     # 计算保留多少事例
+            indices = np.argsort(np_score_gam)[-num_with_efficiency:]           # 找到被保留事例的索引
+            mab_with_efficiency = np.mean(np_ab_gam[indices])                   # 求平均
+            mab_with_efficiency_list.append(mab_with_efficiency)
+
+        print("efficiency_list:", self.efficiency_list)
+        print("mab_with_efficiency_list:", mab_with_efficiency_list)
+        print()
+
+        print("pred_num: 0-{}, 1-{}, 2-{}, 3--{}".format(
+            pred_num_list.count(0),
+            pred_num_list.count(1),
+            pred_num_list.count(2),
+            pred_num_list.count(3),
+        ))
+        print("pred_num_Nm: 0-{}, 1--{}, 2-{}, 3-{}".format(
+            pred_num_Nm_list.count(0),
+            pred_num_Nm_list.count(1),
+            pred_num_Nm_list.count(2),
+            pred_num_Nm_list.count(3),
+        ))
+
+        print("# ##### ##### ##### ##### ##### Gamma ##### ##### ##### ##### ##### #")
+        print()
+        # 光子测量 END
+
         self.get_bin_mean('phi', -np.pi,       np.pi,        self.num_phi_bin, np_gt_phi_all, np_ab_all, np_re_all)
         self.get_bin_mean('the', 0,            np.pi,        self.num_the_bin, np_gt_the_all, np_ab_all, np_re_all)
         self.get_bin_mean('mmt', self.mmt_min, self.mmt_max, self.num_mmt_bin, np_gt_mmt_all, np_ab_all, np_re_all)
@@ -249,13 +381,88 @@ class hep_eval(object):
         pred_bboxes = result["pred_instances"]["bboxes"]
         pred_mmts   = result["pred_instances"]["mmts"]            # 要求必须含有动量预测
 
+        pred_num = 0
+        pred_num_Nm = 1
+
         if len(pred_labels) == 0:
-            pred_score = -self.eps
-            pred_label = 0
-            pred_phi = 0.0
-            pred_the = 0.5 * np.pi
-            pred_mmt = -self.eps
+            pred_score = pred_score_gam1 = pred_score_gam2 = -self.eps
+            pred_label = pred_label_gam1 = pred_label_gam2 = 0
+            pred_phi = pred_phi_gam1 = pred_phi_gam2 = 0.0
+            pred_the = pred_the_gam1 = pred_the_gam2 = 0.5 * np.pi
+            pred_mmt = pred_mmt_gam1 = pred_mmt_gam2 = -self.eps
+            pred_num = 0
         else:
+            # 必须至少有1个反中子和2个光子，且我们假设反中子的优先级低于光子
+            if len(pred_labels) == 1:
+                pred_scores = pred_scores[[0, 0, 0]]
+                pred_labels = pred_labels[[0, 0, 0]]
+                pred_bboxes = pred_bboxes[[0, 0, 0]]
+                pred_mmts   = pred_mmts[[0, 0, 0]]
+                pred_num = 1
+            elif len(pred_labels) == 2:
+                pred_scores = pred_scores[[0, 1, 1]]
+                pred_labels = pred_labels[[0, 1, 1]]
+                pred_bboxes = pred_bboxes[[0, 1, 1]]
+                pred_mmts   = pred_mmts[[0, 1, 1]]
+                pred_num = 2
+            else:
+                pred_num = 3
+
+            # 如果预测结果中反中子数量为0，则我们假设第2顺位为反中子
+            if pred_labels.tolist().count(0) == 0:
+                pred_labels[2] = 0
+                pred_num_Nm = 0
+            # 如果预测结果中光子数量为0，则我们假设第0、1顺位为光子
+            elif pred_labels.tolist().count(1) == 0:
+                pred_labels[0] = 1
+                pred_labels[1] = 1
+                pred_num_Nm = 3
+            # 如果预测结果中光子数量为1，则我们假设第1个反中子实际为光子
+            elif pred_labels.tolist().count(1) == 1:
+                if pred_labels[0] == 1:
+                    pred_labels[1] = 1
+                else:
+                    pred_labels[0] = 1
+                pred_num_Nm = 2
+            else:
+                pred_num_Nm = 1
+
+            pred_mask_gam = (pred_labels == 1)
+            pred_scores_gam = pred_scores[pred_mask_gam]
+            pred_labels_gam = pred_labels[pred_mask_gam]
+            pred_bboxes_gam = pred_bboxes[pred_mask_gam]
+            pred_mmts_gam   = pred_mmts[pred_mask_gam]
+
+            # ##### ##### ##### ##### ##### Gamma1 ##### ##### ##### ##### ##### #
+
+            pred_score_gam1 = float(pred_scores_gam[0])
+            pred_label_gam1 = int(pred_labels_gam[0])
+            pred_bbox_gam1 = pred_bboxes_gam[0]
+            pred_x_ctr_gam1 = (pred_bbox_gam1[0] + pred_bbox_gam1[2]) * 0.5
+            pred_y_ctr_gam1 = (pred_bbox_gam1[1] + pred_bbox_gam1[3]) * 0.5
+            pred_phi_gam1 = float(pred_x_ctr_gam1 / image_w * 2 * np.pi - np.pi)
+            pred_the_gam1 = float(pred_y_ctr_gam1 / image_h * np.pi)
+            pred_mmt_gam1 = float(pred_mmts_gam[0, 0])
+
+            # ##### ##### ##### ##### ##### Gamma2 ##### ##### ##### ##### ##### #
+
+            pred_score_gam2 = float(pred_scores_gam[1])
+            pred_label_gam2 = int(pred_labels_gam[1])
+            pred_bbox_gam2 = pred_bboxes_gam[1]
+            pred_x_ctr_gam2 = (pred_bbox_gam2[0] + pred_bbox_gam2[2]) * 0.5
+            pred_y_ctr_gam2 = (pred_bbox_gam2[1] + pred_bbox_gam2[3]) * 0.5
+            pred_phi_gam2 = float(pred_x_ctr_gam2 / image_w * 2 * np.pi - np.pi)
+            pred_the_gam2 = float(pred_y_ctr_gam2 / image_h * np.pi)
+            pred_mmt_gam2 = float(pred_mmts_gam[1, 0])
+
+            # ##### ##### ##### ##### #####   Nm   ##### ##### ##### ##### ##### #
+
+            pred_mask_Nm = (pred_labels == 0)
+            pred_scores = pred_scores[pred_mask_Nm]
+            pred_labels = pred_labels[pred_mask_Nm]
+            pred_bboxes = pred_bboxes[pred_mask_Nm]
+            pred_mmts   = pred_mmts[pred_mask_Nm]
+
             pred_score = float(pred_scores[0])                              # 注意必须强制类型转换，否则写入excel会报错
             pred_label = int(pred_labels[0])
             pred_bbox = pred_bboxes[0]                                      # 格式为[xmin, ymin, xmax, ymax]
@@ -265,7 +472,10 @@ class hep_eval(object):
             pred_the = float(pred_y_ctr / image_h * np.pi)                  # the: [0, pi)
             pred_mmt = float(pred_mmts[0, 0])
 
-        return (image_id, pred_score, pred_label, pred_phi, pred_the, pred_mmt)
+        return (image_id, pred_score, pred_label, pred_phi, pred_the, pred_mmt,
+                pred_score_gam1, pred_label_gam1, pred_phi_gam1, pred_the_gam1, pred_mmt_gam1,
+                pred_score_gam2, pred_label_gam2, pred_phi_gam2, pred_the_gam2, pred_mmt_gam2,
+                pred_num, pred_num_Nm)
 
 
     def get_bin_mean(self, hint, gt_min, gt_max, num_bin, gt_array, ab_array, re_array):
@@ -316,7 +526,7 @@ class hep_eval(object):
                 single_pred = None if self.visual_ignore_pred else self.result_all[ind]
 
                 single_image = self.ann_coco['images'][ind]
-                single_gt = self.ann_coco['annotations'][ind * self.gt_per_image]
+                single_gt = self.ann_coco['annotations'][ind * 3]               # 固定有1个反中子和2个光子
 
                 # TODO: visualization with both Nm and Gamma
                 visualization(
@@ -341,9 +551,9 @@ if __name__ == '__main__':
     parser.add_argument("--json_path", type = str, default = "./data/HEP2COCO/bbox_scale_10/Nm_1m__b00000001__e00100000.json", help = "json path")
     # 
     # parser.add_argument("--num_classes", type = int, default = 2, help = "")
-    parser.add_argument("--mmt_min", type = float, default = 0.0, help = "")
-    parser.add_argument("--mmt_max", type = float, default = 1.2, help = "")
-    parser.add_argument("--gt_per_image", type = int, default = 1, help = "")
+    parser.add_argument("--mmt_min", type = float, default = 0.2, help = "")
+    parser.add_argument("--mmt_max", type = float, default = 1.4, help = "")
+    # parser.add_argument("--gt_per_image", type = int, default = 1, help = "")
     # 
     parser.add_argument("--need_excel", type = int, default = 0, help = "")
     parser.add_argument("--excel_path", type = str, default = "./work_dirs/hep-retinanet_vheatk-tiny_fpn_1x_hep2coco/results_ep12.xlsx", help = "excel path")
@@ -361,7 +571,7 @@ if __name__ == '__main__':
         # num_classes = opt.num_classes, 
         mmt_min = opt.mmt_min, 
         mmt_max = opt.mmt_max, 
-        gt_per_image = opt.gt_per_image, 
+        # gt_per_image = opt.gt_per_image, 
         # 
         need_excel = opt.need_excel, 
         excel_path = opt.excel_path, 

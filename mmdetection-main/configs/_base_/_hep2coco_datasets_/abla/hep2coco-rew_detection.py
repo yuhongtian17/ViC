@@ -20,7 +20,7 @@ backend_args = None
 train_pipeline = [
     dict(type='LoadImageFromHEP', backend_args=backend_args,
          bg_version='black_randn', snr_db=10.0),
-    dict(type='HEPLoadAnnotations', with_bbox=True, with_mmt=True),
+    dict(type='HEPLoadAnnotations', with_bbox=True),
     dict(type='Resize', scale=(960, 480), keep_ratio=True),
     dict(type='RandomFlip', prob=0.5),
     dict(type='HEPPackDetInputs')
@@ -28,7 +28,7 @@ train_pipeline = [
 test_pipeline = [
     dict(type='LoadImageFromHEP', backend_args=backend_args,
          bg_version='black_randn_seed', snr_db=10.0),
-    dict(type='HEPLoadAnnotations', with_bbox=True, with_mmt=True),
+    dict(type='HEPLoadAnnotations', with_bbox=True),
     dict(type='Resize', scale=(960, 480), keep_ratio=True),
     dict(
         type='HEPPackDetInputs',
@@ -64,6 +64,8 @@ train_dataset_base = dict(
     # ann_file='annotations/instances_train2017.json',
     # data_prefix=dict(img='train2017/'),
     ann_file='',
+    mmt_min=0.0,
+    mmt_max=1.2,
     data_prefix=dict(img='./'),
     filter_cfg=dict(filter_empty_gt=True, min_size=32),
     pipeline=train_pipeline,
@@ -101,6 +103,8 @@ val_dataloader = dict(
         # ann_file='annotations/instances_val2017.json',
         # data_prefix=dict(img='val2017/'),
         ann_file=ann_files[0],
+        mmt_min=0.0,
+        mmt_max=1.2,
         data_prefix=dict(img='./'),
         test_mode=True,
         pipeline=test_pipeline,

@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional, Union, Tuple, Dict
 
 import torch
 import torch.nn as nn
@@ -22,12 +22,16 @@ from mmengine.runner.checkpoint import CheckpointLoader
 
 
 @MODELS.register_module()
-class HEPv2DenseTransformerHead(BaseDenseHead):
+class HEPv2DenseHead(BaseDenseHead):
 
     def __init__(
         self,
         num_classes: int = 2,
         in_channels: int = 768,
+        # 
+        use_fc_head: bool = False,
+        num_shared_fcs: int = 2,
+        fc_out_channels: int = 768,
         # 
         embed_dim=384, # 512,
         depth=8,
@@ -39,8 +43,8 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
         act_cfg=dict(type='GELU'),
         with_cp=False,
         # 
-        phithe_pos_thresh: float = 45.0,
-        phithe_base: float = 45.0,
+        # phithe_pos_thresh: float = 45.0,
+        phithe_base: Union[float, List[float]] = 45.0,
         phithe_mean: float = 0.0,
         phithe_std: float = 1.0,
         # 
@@ -50,11 +54,13 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
         mmt_mean: float = 0.0,
         mmt_std: float = 1.0,
         mmt_encode_mode: str = 'base',
+        mmt_reg_channels: int = 1,
         # 
         len_seq: int = 640,
         use_mmt_token: bool = True,
-        backbone_out_eng=True,
-        backbone_out_phithe=False,
+        use_hit_token_for_mmt: bool = False,
+        backbone_out_eng: bool = True,
+        backbone_out_phithe: bool = False,
         # 
         loss_cls=dict(
             type='FocalLoss',
@@ -64,6 +70,19 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
             loss_weight=1.0),
         loss_phithe_reg=dict(type='L1Loss', loss_weight=1.0),
         loss_mmt_reg=dict(type='L1Loss', loss_weight=1.0),
+        # 
+        # loss_mmt_label=dict(
+        #     type='FocalLoss',
+        #     use_sigmoid=True,
+        #     gamma=2.0,
+        #     alpha=0.25,
+        #     loss_weight=1.0),
+        loss_mmt_label=None,
+        mmt_label_channels: int = 12,
+        # 
+        phithe_nms_thr: float = 3.0,
+        score_thr: float = 0.0,
+        max_per_img: int = 1,
         train_cfg: OptConfigType = None,
         test_cfg: OptConfigType = None,
         init_cfg: OptMultiConfig = None,
@@ -75,6 +94,10 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
         self.num_classes = num_classes
         self.in_channels = in_channels
 
+        self.use_fc_head = use_fc_head
+        self.num_shared_fcs = num_shared_fcs
+        self.fc_out_channels = fc_out_channels
+
         self.use_sigmoid_cls = loss_cls.get('use_sigmoid', False)
         if self.use_sigmoid_cls:
             self.cls_out_channels = num_classes
@@ -84,8 +107,15 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
         if self.cls_out_channels <= 0:
             raise ValueError(f'num_classes={num_classes} is too small')
 
-        self.phithe_pos_thresh = phithe_pos_thresh / 180 * torch.pi
-        self.phithe_base = phithe_base / 180 * torch.pi
+        # self.phithe_pos_thresh = phithe_pos_thresh / 180 * torch.pi
+        if isinstance(phithe_base, float) or isinstance(phithe_base, int):
+            self.phithe_base = [phithe_base / 180 * torch.pi] * self.num_classes
+        elif isinstance(phithe_base, list) or isinstance(phithe_base, tuple):
+            assert len(phithe_base) == self.num_classes
+            self.phithe_base = [temp / 180 * torch.pi for temp in phithe_base]
+        else:
+            raise NotImplementedError
+
         self.phithe_mean = phithe_mean
         self.phithe_std = phithe_std
         self.phithe_reg_channels = 2
@@ -97,10 +127,14 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
         self.mmt_std = mmt_std
         self.mmt_encode_mode = mmt_encode_mode
         self.use_sigmoid_mmt = loss_mmt_reg.get('use_sigmoid', False)
-        self.mmt_reg_channels = 1
+        self.mmt_reg_channels = mmt_reg_channels
+
+        self.use_mmt_label = (loss_mmt_label is not None)
+        self.mmt_label_channels = mmt_label_channels
 
         self.len_seq = len_seq
         self.use_mmt_token = use_mmt_token
+        self.use_hit_token_for_mmt = use_hit_token_for_mmt
         self.backbone_out_eng = backbone_out_eng
         self.backbone_out_phithe = backbone_out_phithe
 
@@ -108,22 +142,31 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
         self.loss_phithe_reg = MODELS.build(loss_phithe_reg)
         self.loss_mmt_reg = MODELS.build(loss_mmt_reg)
 
+        if self.use_mmt_label:
+            self.loss_mmt_label = MODELS.build(loss_mmt_label)
+
+        self.phithe_nms_thr = phithe_nms_thr / 180 * torch.pi
+        self.score_thr = score_thr
+        self.max_per_img = max_per_img
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
 
         self.fp16_enabled = False
-        self._init_layers(
-            in_channels,
-            embed_dim,
-            depth,
-            num_heads,
-            mlp_ratio,
-            qkv_bias,
-            drop_path_rate,
-            norm_cfg,
-            act_cfg,
-            with_cp,
-        )
+        if self.use_fc_head:
+            self._fc_init_layers()
+        else:
+            self._trans_init_layers(
+                in_channels,
+                embed_dim,
+                depth,
+                num_heads,
+                mlp_ratio,
+                qkv_bias,
+                drop_path_rate,
+                norm_cfg,
+                act_cfg,
+                with_cp,
+            )
 
         self.width = 960
         self.height = 480
@@ -162,7 +205,91 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
             incompatibleKeys = self.load_state_dict(_state_dict, False)
             print(incompatibleKeys)
 
-    def _init_layers(
+
+    def _fc_init_layers(self):
+        """Initialize layers of the head."""
+        self.relu = nn.ReLU(inplace=True)
+
+        self.shared_fcs = nn.ModuleList()
+        if self.num_shared_fcs > 0:
+            for i in range(self.num_shared_fcs):
+                fc_in_channels = self.in_channels if i == 0 else self.fc_out_channels
+                self.shared_fcs.append(
+                    nn.Linear(fc_in_channels, self.fc_out_channels))
+            last_layer_dim = self.fc_out_channels
+        else:
+            last_layer_dim = self.in_channels
+
+        self.dense_cls        = nn.Linear(last_layer_dim, self.cls_out_channels)
+        self.dense_phithe_reg = nn.Linear(last_layer_dim, self.phithe_reg_channels)
+
+        if self.use_mmt_token:
+            self.dense_mmt_reg = nn.Linear(last_layer_dim, self.mmt_reg_channels)
+        if self.use_hit_token_for_mmt:
+            self.dense_hit_reg = nn.Linear(last_layer_dim, self.mmt_reg_channels)
+        if self.use_mmt_label:
+            self.dense_mmt_label = nn.Linear(last_layer_dim, self.mmt_label_channels)
+
+        self.apply(self._init_weights)
+
+    def _fc_forward(self, inputs):
+        # 来自HEPv2Transformer: backbone_outs是List[Tensor], 每个Tensor形状为[B, N, C]
+        backbone_outs, backbone_outs_others = inputs
+        feat_x = backbone_outs[-1]
+        flags = backbone_outs_others['x'][..., 0:1]
+        assert not flags.requires_grad
+
+        if self.num_shared_fcs > 0:
+            for fc in self.shared_fcs:
+                feat_x = self.relu(fc(feat_x))
+
+        # ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #
+
+        if self.use_mmt_token:
+            feat_x_main = feat_x[:, :-1, :]
+            feat_x_mmt = feat_x[:, -1:, :]
+        else:
+            feat_x_main = feat_x
+            feat_x_mask = (flags > self.eps)
+            feat_x_mmt = (feat_x * feat_x_mask).sum(dim=1, keepdim=True) / feat_x_mask.sum(dim=1, keepdim=True)
+
+        N = self.len_seq
+
+        cls_scores = []
+        phithe_reg_preds = []
+        mmt_reg_preds = []
+        mmt_label_scores = []
+
+        cls_score = self.dense_cls(feat_x_main)
+        phithe_reg_pred = self.dense_phithe_reg(feat_x_main)
+
+        if self.use_mmt_token:
+            mmt_reg_pred = self.dense_mmt_reg(feat_x_mmt).repeat(1, N, 1)
+        if self.use_hit_token_for_mmt:
+            hit_reg_pred = self.dense_hit_reg(feat_x_main)
+            if self.use_mmt_token:
+                # max_values, max_indices = torch.max(cls_score, dim=-1, keepdim=False)
+                # replace_mask = (max_indices > 0)
+                # mmt_reg_pred[replace_mask] = hit_reg_pred[replace_mask]
+                max_values, max_indices = torch.max(cls_score, dim=-1, keepdim=True)
+                replace_mask = (max_indices > 0)
+                mmt_reg_pred = mmt_reg_pred * (~replace_mask) + hit_reg_pred * replace_mask
+            else:
+                mmt_reg_pred = hit_reg_pred
+        if self.use_mmt_label:
+            mmt_label_score = self.dense_mmt_label(feat_x_mmt).repeat(1, N, 1)
+        else:
+            mmt_label_score = None
+
+        cls_scores.append(cls_score)
+        phithe_reg_preds.append(phithe_reg_pred)
+        mmt_reg_preds.append(mmt_reg_pred)
+        mmt_label_scores.append(mmt_label_score)
+
+        return cls_scores, phithe_reg_preds, mmt_reg_preds, mmt_label_scores
+
+
+    def _trans_init_layers(
         self,
         in_channels=768,
         embed_dim=384, # 512,
@@ -202,10 +329,17 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
 
         self.dense_cls        = nn.Linear(embed_dim, self.cls_out_channels)
         self.dense_phithe_reg = nn.Linear(embed_dim, self.phithe_reg_channels)
-        self.dense_mmt_reg    = nn.Linear(embed_dim, self.mmt_reg_channels)
+
+        if self.use_mmt_token:
+            self.dense_mmt_reg = nn.Linear(embed_dim, self.mmt_reg_channels)
+        if self.use_hit_token_for_mmt:
+            self.dense_hit_reg = nn.Linear(embed_dim, self.mmt_reg_channels)
+        if self.use_mmt_label:
+            self.dense_mmt_label = nn.Linear(embed_dim, self.mmt_label_channels)
+
         self.apply(self._init_weights)
 
-    def forward(self, inputs):
+    def _trans_forward(self, inputs):
         # 来自HEPv2Transformer: backbone_outs是List[Tensor], 每个Tensor形状为[B, N, C]
         backbone_outs, backbone_outs_others = inputs
 
@@ -265,25 +399,55 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
 
         # ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #
 
-        if not self.use_mmt_token:
-            feat_main = feat_x
-            feat_mask = (flags > self.eps)
-            feat_mmt = (feat_x * feat_mask).sum(dim=1, keepdim=True) / feat_mask.sum(dim=1, keepdim=True)
+        if self.use_mmt_token:
+            feat_x_main = feat_x[:, :-1, :]
+            feat_x_mmt = feat_x[:, -1:, :]
         else:
-            feat_main = feat_x[:, :-1, :]
-            feat_mmt = feat_x[:, -1:, :]
+            feat_x_main = feat_x
+            feat_x_mask = (flags > self.eps)
+            feat_x_mmt = (feat_x * feat_x_mask).sum(dim=1, keepdim=True) / feat_x_mask.sum(dim=1, keepdim=True)
 
         N = self.len_seq
 
         cls_scores = []
         phithe_reg_preds = []
         mmt_reg_preds = []
+        mmt_label_scores = []
 
-        cls_scores.append(self.dense_cls(feat_main))
-        phithe_reg_preds.append(self.dense_phithe_reg(feat_main))
-        mmt_reg_preds.append(self.dense_mmt_reg(feat_mmt).repeat(1, N, 1))
+        cls_score = self.dense_cls(feat_x_main)
+        phithe_reg_pred = self.dense_phithe_reg(feat_x_main)
 
-        return cls_scores, phithe_reg_preds, mmt_reg_preds
+        if self.use_mmt_token:
+            mmt_reg_pred = self.dense_mmt_reg(feat_x_mmt).repeat(1, N, 1)
+        if self.use_hit_token_for_mmt:
+            hit_reg_pred = self.dense_hit_reg(feat_x_main)
+            if self.use_mmt_token:
+                # max_values, max_indices = torch.max(cls_score, dim=-1, keepdim=False)
+                # replace_mask = (max_indices > 0)
+                # mmt_reg_pred[replace_mask] = hit_reg_pred[replace_mask]
+                max_values, max_indices = torch.max(cls_score, dim=-1, keepdim=True)
+                replace_mask = (max_indices > 0)
+                mmt_reg_pred = mmt_reg_pred * (~replace_mask) + hit_reg_pred * replace_mask
+            else:
+                mmt_reg_pred = hit_reg_pred
+        if self.use_mmt_label:
+            mmt_label_score = self.dense_mmt_label(feat_x_mmt).repeat(1, N, 1)
+        else:
+            mmt_label_score = None
+
+        cls_scores.append(cls_score)
+        phithe_reg_preds.append(phithe_reg_pred)
+        mmt_reg_preds.append(mmt_reg_pred)
+        mmt_label_scores.append(mmt_label_score)
+
+        return cls_scores, phithe_reg_preds, mmt_reg_preds, mmt_label_scores
+
+
+    def forward(self, inputs):
+        if self.use_fc_head:
+            return self._fc_forward(inputs)
+        else:
+            return self._trans_forward(inputs)
 
 
     def mmt_encode_sigmoid(self, mmt_gts) -> torch.Tensor:
@@ -309,11 +473,31 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
         return torch.exp(mmt_preds * self.mmt_std + self.mmt_mean) * self.mmt_base
 
 
-    def phithe_encode_base(self, phithe_gts, phithe_anchors) -> torch.Tensor:
-        return ((phithe_gts - phithe_anchors) / self.phithe_base - self.phithe_mean) / self.phithe_std
+    def phithe_encode_base(self, phithe_gts, phithe_anchors, label_anchors) -> torch.Tensor:
+        """
+        Args:
+            phithe_gts: torch.Tensor [N, 2]
+            phithe_anchors: torch.Tensor [N, 2]
+            label_anchors: torch.Tensor [N]
+        Returns:
+            encoded_phithe: torch.Tensor [N, 2]
+        """
+        base_1 = torch.tensor(self.phithe_base, device=label_anchors.device)[label_anchors]
+        base_2 = base_1.unsqueeze(-1).repeat(1, 2)
+        return ((phithe_gts - phithe_anchors) / base_2 - self.phithe_mean) / self.phithe_std
 
-    def phithe_decode_base(self, phithe_preds, phithe_anchors) -> torch.Tensor:
-        return phithe_anchors + self.phithe_base * (phithe_preds * self.phithe_std + self.phithe_mean)
+    def phithe_decode_base(self, phithe_preds, phithe_anchors, label_anchors) -> torch.Tensor:
+        """
+        Args:
+            phithe_preds: torch.Tensor [N, 2]
+            phithe_anchors: torch.Tensor [N, 2]
+            label_anchors: torch.Tensor [N]
+        Returns:
+            decoded_phithe: torch.Tensor [N, 2]
+        """
+        base_1 = torch.tensor(self.phithe_base, device=label_anchors.device)[label_anchors]
+        base_2 = base_1.unsqueeze(-1).repeat(1, 2)
+        return phithe_anchors + base_2 * (phithe_preds * self.phithe_std + self.phithe_mean)
 
 
     # def bbox_to_phithe(self, bbox_gts) -> torch.Tensor:
@@ -443,62 +627,120 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
         mmt_reg_targets = torch.zeros([B, N, self.mmt_reg_channels], device=device)
         mmt_reg_weights = torch.zeros([B, N, self.mmt_reg_channels], device=device)
 
+        if self.use_mmt_label:
+            mmt_labels = torch.zeros([B, N], dtype=torch.long, device=device) + self.mmt_label_channels
+            mmt_label_weights = torch.ones([B, N], device=device)
+            mmt_label_avg_factor = torch.sum(mmt_label_weights)
+        else:
+            mmt_labels = None
+            mmt_label_weights = None
+            mmt_label_avg_factor = 0
+
         # 逐个gt填充进targets和weights
         for i, gt_instances in enumerate(batch_gt_instances):
             # gt_bboxes = gt_instances['bboxes']
-            gt_labels = gt_instances['labels']              # shape: 1
-            gt_phithe_regs = gt_instances['phithe_regs']    # shape: 1, 2
-            gt_mmt_regs = gt_instances['mmt_regs']          # shape: 1, 1
+            gt_labels = gt_instances['labels']              # shape: G
+            gt_phithe_regs = gt_instances['phithe_regs']    # shape: G, 2
+            gt_mmt_regs = gt_instances['mmt_regs']          # shape: G, 1
 
-            anchors_phi_i = anchors_phi[i]
-            anchors_the_i = anchors_the[i]
-            gt_phi, gt_the = gt_phithe_regs[0]
+            G = len(gt_labels)
 
-            # 简单的判断正负锚框的方法
-            # phi和the偏差都不超过6°的标记为positive
-            pos_anchors = (torch.abs(anchors_phi_i - gt_phi) < self.phithe_pos_thresh) & \
-                          (torch.abs(anchors_the_i - gt_the) < self.phithe_pos_thresh)
-            # 取phi+the偏差最小的也标记为positive
-            min_values, min_indices = torch.min(
-                torch.abs(anchors_phi_i - gt_phi) +
-                torch.abs(anchors_the_i - gt_the), dim=-1)
-            pos_anchors[min_indices] = True
+            gt_phi = gt_phithe_regs[:, 0:1]                 # shape: G, 1
+            gt_the = gt_phithe_regs[:, 1:2]                 # shape: G, 1
+            anchors_phi_i = anchors_phi[i:i+1]              # shape: 1, N
+            anchors_the_i = anchors_the[i:i+1]              # shape: 1, N
+
+            # 1. 对于gt_label中的每个元素，假设其值为k，取phithe_base第k个元素的值，构成一个大小[G]的torch Tensor
+            #    (e.g. self.phithe_base = [45, 15], gt_label = [0, 1, 1], base_1 = [45, 15, 15])
+            base_1 = torch.tensor(self.phithe_base, device=device)[gt_labels]
+            base_2 = base_1.unsqueeze(-1).repeat(1, N)      # shape: G, N
+
+            # 2. 计算abs_phi=abs(anchors_phi-gt_phi)和abs_the=abs(anchors_the-gt_the)，得到两个大小[G, N]的torch Tensor；
+            #    计算anchors_distance=abs_phi+abs_the，得到一个大小[G, N]的torch Tensor。
+            abs_phi = torch.abs(anchors_phi_i - gt_phi)     # shape: G, N
+            abs_the = torch.abs(anchors_the_i - gt_the)     # shape: G, N
+            anchors_distance = abs_phi + abs_the            # shape: G, N
+
+            # 3. 判断哪些是正样本anchor：
+            #    计算anchors_positive=(abs_phi<phithe_base) & (abs_the<phithe_base)，得到一个大小[G, N]的torch Tensor；
+            #    对于G行N列的anchors_positive表中的每一列，按列取逻辑或，构成一个大小[N]的torch Tensor。
+            anchors_positive = (abs_phi < base_2) & (abs_the < base_2)
+            pos_anchors = torch.any(anchors_positive, dim=0)
+
+            # 4. 建立一个anchors_distance的副本anchors_distance_clone，对于anchors_positive中的每个False，将anchors_distance_clone中的对应值改为1e6
+            anchors_distance_clone = anchors_distance.clone()
+            anchors_distance_clone[~anchors_positive] = 1e6
+
+            # 5. 判断每个anchor负责哪个gt：对于G行N列的anchors_distance_clone表中的每一列，查找最小值所在的行编号，构成一个大小[N]的torch Tensor
+            _, anchors_gt = torch.min(anchors_distance_clone, dim=0)
+
+            # 6. 正样本anchor的保底方案：对于G行N列的anchors_distance表前num_hits列中的每一行，假设其行编号为i，查找最小值所在的列编号j，将anchors_gt[j]置为i，将pos_anchors[j]置为True
+            valid_anchors = (anchors_flag[i] > 0.5)
+            num_hits = int(valid_anchors.sum())
+            valid_distance = anchors_distance[:, :num_hits]  # shape: G, num_hits
+
+            # 对每行找最小值所在的列索引
+            _, row_min_indices = torch.min(valid_distance, dim=1)
+            # 创建行索引 [0, 1, ..., G-1]
+            row_indices = torch.arange(G, device=device)
+
+            # 更新anchors_gt和pos_anchors
+            anchors_gt[row_min_indices] = row_indices
+            pos_anchors[row_min_indices] = True
+            assert not anchors_gt.requires_grad
+            assert not pos_anchors.requires_grad
+
             # 剩下的都标记为negative
             neg_anchors = ~pos_anchors
-
             # 超出num_hits的，标记为invalid
-            valid_anchors = (anchors_flag[i] > 0.5)
             pos_anchors &= valid_anchors
             neg_anchors &= valid_anchors
 
+            # 7. 对于anchors_gt中的每个元素，假设其值为i，
+            #    取gt_label第i个元素，构成一个大小为[N]的torch Tensor；
+            #    取gt_phi、gt_the第i个元素，构成一个大小为[N, 2]的torch Tensor；
+            #    取gt_mmt_regs第i个元素，构成一个大小为[N, 1]的torch Tensor。
+            label_anchors = gt_labels[anchors_gt]
+
+            phi_gts = gt_phi[anchors_gt]
+            the_gts = gt_the[anchors_gt]
+            phithe_gts = torch.cat([phi_gts, the_gts], dim=1)
+
+            mmt_gts = gt_mmt_regs[anchors_gt]
+
             # 对gt进行编码
-            priors = torch.vstack([anchors_phi_i, anchors_the_i]).transpose(0, 1)
-            encoded_phithe = self.phithe_encode_base(gt_phithe_regs, priors)
+            priors = torch.cat([anchors_phi_i, anchors_the_i], dim=0).transpose(0, 1)
+            encoded_phithe = self.phithe_encode_base(phithe_gts, priors, label_anchors)
             if self.mmt_encode_mode == 'base':
-                encoded_mmt = self.mmt_encode_base(gt_mmt_regs[0])
+                encoded_mmt = self.mmt_encode_base(mmt_gts)
             elif self.mmt_encode_mode == 'direct':
-                encoded_mmt = self.mmt_encode_direct(gt_mmt_regs[0])
+                encoded_mmt = self.mmt_encode_direct(mmt_gts)
             elif self.mmt_encode_mode == 'sigmoid':
-                encoded_mmt = self.mmt_encode_sigmoid(gt_mmt_regs[0])
+                encoded_mmt = self.mmt_encode_sigmoid(mmt_gts)
             else:
                 raise NotImplementedError
 
             # 填充进targets和weights
-            labels[i, pos_anchors] = gt_labels[0]
+            labels[i, pos_anchors] = label_anchors[pos_anchors]
             label_weights[i, valid_anchors] = 1.0
             phithe_reg_targets[i] = encoded_phithe
             phithe_reg_weights[i, pos_anchors] = 1.0
             mmt_reg_targets[i] = encoded_mmt
-            mmt_reg_weights[i, :] = 1.0
+            mmt_reg_weights[i, pos_anchors] = 1.0
+
+            if self.use_mmt_label:
+                mmt_labels[i] = gt_instances['mmt_labels'][0]
 
         avg_factors = [
             torch.sum(label_weights),
             torch.sum(phithe_reg_weights) / self.phithe_reg_channels,
             torch.sum(mmt_reg_weights) / self.mmt_reg_channels,
+            mmt_label_avg_factor,
         ]
 
         return (labels, label_weights, phithe_reg_targets, phithe_reg_weights,
                 mmt_reg_targets, mmt_reg_weights,
+                mmt_labels, mmt_label_weights,
                 avg_factors)
 
     def loss_by_feat(
@@ -506,6 +748,7 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
             cls_scores: List[Tensor],
             phithe_reg_preds: List[Tensor],
             mmt_reg_preds: List[Tensor],
+            mmt_label_scores: List[Optional[Tensor]],
             batch_gt_instances: InstanceList,
             batch_img_metas: List[dict],
             batch_gt_instances_ignore: OptInstanceList = None) -> dict:
@@ -522,6 +765,7 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
             device=device)
         (labels, label_weights, phithe_reg_targets, phithe_reg_weights,
          mmt_reg_targets, mmt_reg_weights,
+         mmt_labels, mmt_label_weights,
          avg_factors) = cls_reg_targets
 
         # classification loss
@@ -548,7 +792,17 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
         losses_mmt_reg = self.loss_mmt_reg(
             mmt_reg_pred, mmt_reg_targets, mmt_reg_weights, avg_factor=int(avg_factors[2]))
 
-        return dict(loss_cls=losses_cls, loss_phithe_reg=losses_phithe_reg, loss_mmt_reg=losses_mmt_reg)
+        if self.use_mmt_label:
+            mmt_labels = mmt_labels.reshape(-1)
+            mmt_label_weights = mmt_label_weights.reshape(-1)
+            mmt_label_score = mmt_label_scores[-1].reshape(-1, self.mmt_label_channels)
+            losses_mmt_label = self.loss_mmt_label(
+                mmt_label_score, mmt_labels, mmt_label_weights, avg_factor=int(avg_factors[3]))
+        else:
+            losses_mmt_label = torch.zeros(1, device=losses_cls.device)
+
+        return dict(loss_cls=losses_cls, loss_phithe_reg=losses_phithe_reg, loss_mmt_reg=losses_mmt_reg,
+                    loss_mmt_label=losses_mmt_label)
 
 
     # ##### ##### ##### ##### ##### ##### from base_dense_head.py ##### ##### ##### ##### ##### ##### #
@@ -558,6 +812,7 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
                         cls_scores: List[Tensor],
                         phithe_reg_preds: List[Tensor],
                         mmt_reg_preds: List[Tensor],
+                        mmt_label_scores: List[Optional[Tensor]],
                         score_factors: Optional[List[Tensor]] = None,
                         batch_img_metas: Optional[List[dict]] = None,
                         cfg: Optional[ConfigDict] = None,
@@ -575,10 +830,16 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
             mmt_reg_pred_list = select_single_mlvl(
                 mmt_reg_preds, img_id, detach=True)
 
+            if self.use_mmt_label:
+                mmt_label_score_list = select_single_mlvl(mmt_label_scores, img_id, detach=True)
+            else:
+                mmt_label_score_list = [None, ] * len(cls_score_list)
+
             results = self._predict_by_feat_single(
                 cls_score_list=cls_score_list,
                 phithe_reg_pred_list=phithe_reg_pred_list,
                 mmt_reg_pred_list=mmt_reg_pred_list,
+                mmt_label_score_list=mmt_label_score_list,
                 img_meta=img_meta)
             result_list.append(results)
         return result_list
@@ -587,6 +848,7 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
                                 cls_score_list: List[Tensor],
                                 phithe_reg_pred_list: List[Tensor],
                                 mmt_reg_pred_list: List[Tensor],
+                                mmt_label_score_list: List[Optional[Tensor]],
                                 img_meta: dict) -> InstanceData:
 
         device = cls_score_list[-1].device
@@ -600,6 +862,12 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
         phithe_reg_pred = phithe_reg_pred_list[-1].reshape(-1, self.phithe_reg_channels)    # shape: N, 2
         mmt_reg_pred = mmt_reg_pred_list[-1].reshape(-1, self.mmt_reg_channels)             # shape: N, 1
 
+        if self.use_mmt_label:
+            mmt_label_score = mmt_label_score_list[-1].reshape(-1, self.mmt_label_channels)
+            _, mmt_labels = torch.max(mmt_label_score, dim=-1)
+        else:
+            mmt_labels = torch.zeros((len(mmt_reg_pred), ), dtype=torch.long, device=device)
+
         if self.use_sigmoid_cls:
             scores = cls_score.sigmoid()
         else:
@@ -609,16 +877,10 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
             scores = cls_score.softmax(-1)[:, :-1]
 
         scores *= anchors_flag
-        results = filter_scores_and_topk(
-            scores, 0.0, 1,
-            dict(phithe_reg_pred=phithe_reg_pred, priors=priors))
-        scores, labels, keep_idxs, filtered_results = results                               # shape: 1
+        max_scores, max_labels = torch.max(scores, dim=-1)
+        decoded_phithe = self.phithe_decode_base(phithe_reg_pred, priors, max_labels)
 
-        phithe_reg_pred = filtered_results['phithe_reg_pred']                               # shape: 1, 2
-        priors = filtered_results['priors']                                                 # shape: 1, 2
-        mmt_reg_pred = mmt_reg_pred[keep_idxs]                                              # shape: 1, 1
-
-        bboxes = self.phithe_to_bbox(self.phithe_decode_base(phithe_reg_pred, priors))
+        bboxes = self.phithe_to_bbox(decoded_phithe)
         if self.mmt_encode_mode == 'base':
             mmts = self.mmt_decode_base(mmt_reg_pred)
         elif self.mmt_encode_mode == 'direct':
@@ -628,15 +890,86 @@ class HEPv2DenseTransformerHead(BaseDenseHead):
         else:
             raise NotImplementedError
 
-        assert scores.size(0) == labels.size(0) == bboxes.size(0) == mmts.size(0) == 1
-        assert scores.dim() == labels.dim() == 1
-        assert bboxes.dim() == mmts.dim() == 2
+        keep_idxs = self.nms_for_phithe(
+            max_scores, decoded_phithe, priors,
+            self.phithe_nms_thr, self.score_thr, self.max_per_img, device)
 
         results = InstanceData()
-        results.bboxes = bboxes
-        results.mmts = mmts
-        results.scores = scores
-        results.labels = labels
+        results.bboxes = bboxes[keep_idxs]
+        results.mmts = mmts[keep_idxs]
+        results.mmt_labels = mmt_labels[keep_idxs]
+        results.scores = max_scores[keep_idxs]
+        results.labels = max_labels[keep_idxs]
 
         return results
+
+    def nms_for_phithe(self,
+                       scores, phithe_preds, priors,
+                       phithe_nms_thr, score_thr, max_per_img, device):
+        """
+        张量化实现的NMS操作，基于phi/theta坐标
+
+        Args:
+            scores: torch.Tensor [N] 置信度
+            phithe_preds: torch.Tensor [N, 2] phi和theta预测值
+            priors: torch.Tensor [N, 2] phi和theta先验值
+            phithe_nms_thr: float NMS阈值
+            score_thr: float 置信度阈值
+            max_per_img: int 每张图片最大保留数
+
+        Returns:
+            keep_indices: torch.Tensor [N] 需要保留的索引（已按scores降序排列）
+        """
+        N = len(scores)
+
+        # 对scores进行降序排列，并按这个排列索引重排对应的phithe_preds和priors
+        sorted_scores, sorted_indices = torch.sort(scores, descending=True)
+        sorted_phithe_preds = phithe_preds[sorted_indices]
+        sorted_priors = priors[sorted_indices]
+
+        keep_mask = torch.ones(N, dtype=torch.bool, device=device)
+        keep_num = 0
+
+        for i in range(N):
+            # 如果已被抑制
+            if not keep_mask[i]: continue
+
+            # 最后一个必定不用抑制
+            if i == N - 1: break
+
+            # 当对应的score值小于score_thr时，包括当前的剩余keep_mask均标记为False
+            if sorted_scores[i] < score_thr:
+                keep_mask[i:] = False
+                break
+
+            # 当标为True的个数已达到max_per_img时，剩余keep_mask均标记为False
+            keep_num += 1
+            if keep_num >= max_per_img:
+                keep_mask[i+1:] = False
+                break
+
+            # 类似于NMS操作的：
+            # 对于一个score值对应的一对(phi_pred_high, the_pred_high)值和一对(phi_priors_high, the_prior_high)值，
+            # 遍历所有更小score值对应的(phi_pred_low, the_pred_low)值和(phi_priors_low, the_prior_low)值，
+            #     如果满足abs(phi_priors_low-phi_priors_high)<phithe_nms_thr & abs(the_priors_low-the_priors_high)<phithe_nms_thr，
+            #         那么如果它同时满足abs(phi_pred_low-phi_pred_high)<phithe_nms_thr*2 & abs(the_pred_low-the_pred_high)<phithe_nms_thr*2，
+            #             则其keep_mask标记为False；
+            #     如果不满足，
+            #         那么如果它同时满足abs(phi_pred_low-phi_pred_high)<phithe_nms_thr & abs(the_pred_low-the_pred_high)<phithe_nms_thr，
+            #             则其keep_mask标记为False。
+            phi_priors_diff = torch.abs(sorted_priors[i+1:, 0] - sorted_priors[i, 0])
+            the_priors_diff = torch.abs(sorted_priors[i+1:, 1] - sorted_priors[i, 1])
+            phi_pred_diff = torch.abs(sorted_phithe_preds[i+1:, 0] - sorted_phithe_preds[i, 0])
+            the_pred_diff = torch.abs(sorted_phithe_preds[i+1:, 1] - sorted_phithe_preds[i, 1])
+
+            prior_close = (phi_priors_diff < phithe_nms_thr) & (the_priors_diff < phithe_nms_thr)
+            pred_close_2x = (phi_pred_diff < phithe_nms_thr * 2) & (the_pred_diff < phithe_nms_thr * 2)
+            pred_close_1x = (phi_pred_diff < phithe_nms_thr) & (the_pred_diff < phithe_nms_thr)
+
+            suppress = (prior_close & pred_close_2x) | (~prior_close & pred_close_1x)
+            # 保留已标记的False，新增~suppress标记的False
+            keep_mask[i+1:] = keep_mask[i+1:] & (~suppress)
+
+        keep_indices = sorted_indices[keep_mask]
+        return keep_indices
 

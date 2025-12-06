@@ -163,6 +163,7 @@ class HEPRandomSampler(BaseSampler):
         # print(gt_instances.all_keys())
         # exit()
         gt_mmt_regs = gt_instances.mmt_regs                                                         # mmt
+        gt_mmt_labels = gt_instances.mmt_labels                                                     # mmt_label
 
         if len(priors.shape) < 2:
             priors = priors[None, :]
@@ -204,6 +205,7 @@ class HEPRandomSampler(BaseSampler):
             priors=priors,
             gt_bboxes=gt_bboxes,
             gt_mmt_regs=gt_mmt_regs,                                                                # mmt
+            gt_mmt_labels=gt_mmt_labels,                                                            # mmt_label
             assign_result=assign_result,
             gt_flags=gt_flags)
         return sampling_result

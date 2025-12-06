@@ -46,6 +46,7 @@ class HEPPseudoSampler(BaseSampler):
         priors = pred_instances.priors
 
         gt_mmt_regs = gt_instances.mmt_regs                                                         # mmt
+        gt_mmt_labels = gt_instances.mmt_labels                                                     # mmt_label
 
         pos_inds = torch.nonzero(
             assign_result.gt_inds > 0, as_tuple=False).squeeze(-1).unique()
@@ -59,6 +60,7 @@ class HEPPseudoSampler(BaseSampler):
             priors=priors,
             gt_bboxes=gt_bboxes,
             gt_mmt_regs=gt_mmt_regs,                                                                # mmt
+            gt_mmt_labels=gt_mmt_labels,                                                            # mmt_label
             assign_result=assign_result,
             gt_flags=gt_flags,
             avg_factor_with_neg=False)

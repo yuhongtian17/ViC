@@ -1,10 +1,6 @@
 # Vision Calorimeter (ViC) and Anti-Neutron Transformer (ANT)
 
-<p align="left">
-<a href="https://arxiv.org/abs/2408.10599v2"><img src="https://img.shields.io/badge/arXiv-Paper-<color>"></a>
-</p>
-
-## Abstract
+## Vision Calorimeter: Migrating Visual Object Detectors to High-Energy Particle Images
 
 <div align=center><img src="./figures/vic_figure_1.png"></div>
 
@@ -18,7 +14,7 @@ Experiments demonstrate that ViC significantly outperforms conventional approach
 This study underscores ViC's great potential as a general-purpose particle parameter estimator for high-energy physics.
 Code is available at https://github.com/yuhongtian17/ViC.
 
-Full paper is available at https://arxiv.org/pdf/2408.10599v2.
+## Anti-Neutron Transformer for High-Energy Particle Detection
 
 <div align=center><img src="./figures/ant_figure_2.png"></div>
 
@@ -32,8 +28,6 @@ The energy points also serve as spatial "anchors" for prediction, enabling the m
 ANT undergoes extensive pre-training on quantities of unlabeled $\bar{n}$ events to recover masked position values, providing underlying prior knowledge about spatial radiation patterns of energy.
 Experiments on high-energy particle data show that ANT achieves state-of-the-art performance, while outperforming visual detectors in terms of statistical analysis and physical application.
 Code is available at https://github.com/yuhongtian17/ViC.
-
-Full paper is coming soon.
 
 ## Dataset
 

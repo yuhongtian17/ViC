@@ -429,14 +429,7 @@ class HEPv2Transformer(BaseModule):
 
     def forward(self, x):
         outs_others = dict()
-
-        # 如果没有mmt_token，则需要更多信息辅助mmt回归
-        if not self.use_mmt_token:
-            outs_others['x'] = x.clone()
-        elif self.out_eng or self.out_phithe:
-            outs_others['x'] = x.clone()
-        else:
-            pass
+        outs_others['x'] = x.clone()
 
         B, N, C = x.shape
         assert C == 5                                                           # flags, eng, phi, the, time
@@ -452,7 +445,7 @@ class HEPv2Transformer(BaseModule):
         y_the = self.token_embed_the(x_the)
         y_phithe = torch.cat([y_phi, y_the], dim=2)
 
-        # 如果没有mmt_token，则需要更多信息辅助mmt回归
+        # 预训练需要更多信息辅助
         if self.out_eng:
             outs_others['y_eng']    = y_eng.clone()
         if self.out_phithe:
@@ -480,8 +473,5 @@ class HEPv2Transformer(BaseModule):
                 out = norm_layer(x)
                 outs.append(out)
 
-        if len(outs_others) > 0:
-            return outs, outs_others
-        else:
-            return outs
+        return outs, outs_others
 

@@ -93,19 +93,26 @@ class HEPLoadAnnotations(LoadAnnotations):
     def __init__(
             self,
             with_mmt: bool = True,
+            with_mmt_label: bool = True,
             **kwargs) -> None:
         super().__init__(**kwargs)
         self.with_mmt = with_mmt
+        self.with_mmt_label = with_mmt_label
 
     def _load_mmts(self, results: dict) -> None:
         gt_mmt_regs = []
         for instance in results.get('instances', []):
             gt_mmt_regs.append([instance['p_RM'], ])
 
-        if self.box_type is None:
-            results['gt_mmt_regs'] = np.array(gt_mmt_regs, dtype=np.float32).reshape((-1, 1))
-        else:
-            results['gt_mmt_regs'] = torch.tensor(gt_mmt_regs, dtype=torch.float32).reshape((-1, 1))
+        results['gt_mmt_regs'] = np.array(gt_mmt_regs, dtype=np.float32).reshape((-1, 1))
+
+    def _load_mmt_labels(self, results: dict) -> None:
+        gt_mmt_labels = []
+        for instance in results.get('instances', []):
+            gt_mmt_labels.append(instance['p_RM_label'])
+        # TODO: Inconsistent with mmcv, consider how to deal with it later.
+        results['gt_mmt_labels'] = np.array(
+            gt_mmt_labels, dtype=np.int64)
 
     def transform(self, results: dict) -> dict:
         """Function to load multiple types annotations.
@@ -120,8 +127,10 @@ class HEPLoadAnnotations(LoadAnnotations):
 
         if self.with_bbox:
             self._load_bboxes(results)
-        if self.with_mmt:                                                                           # mmt
-            self._load_mmts(results)                                                                # mmt
+        if self.with_mmt:
+            self._load_mmts(results)
+        if self.with_mmt_label:
+            self._load_mmt_labels(results)
         if self.with_label:
             self._load_labels(results)
         if self.with_mask:
@@ -133,7 +142,8 @@ class HEPLoadAnnotations(LoadAnnotations):
     def __repr__(self) -> str:
         repr_str = self.__class__.__name__
         repr_str += f'(with_bbox={self.with_bbox}, '
-        repr_str += f'with_mmt={self.with_mmt}, '                                                   # mmt
+        repr_str += f'with_mmt={self.with_mmt}, '
+        repr_str += f'with_mmt_label={self.with_mmt_label}, '
         repr_str += f'with_label={self.with_label}, '
         repr_str += f'with_mask={self.with_mask}, '
         repr_str += f'with_seg={self.with_seg}, '
@@ -150,5 +160,6 @@ class HEPPackDetInputs(PackDetInputs):
         'gt_bboxes_labels': 'labels',
         'gt_masks': 'masks',
         'gt_mmt_regs': 'mmt_regs',
+        'gt_mmt_labels': 'mmt_labels',
     }
 

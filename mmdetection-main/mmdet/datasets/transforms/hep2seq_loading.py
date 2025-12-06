@@ -156,6 +156,7 @@ class HEPv2LoadAnnotations(BaseTransform):
         with_label: bool = True,
         with_phithe: bool = True,
         with_mmt: bool = True,
+        with_mmt_label: bool = True,
         backend_args: Optional[dict] = None,
     ) -> None:
         super().__init__()
@@ -163,6 +164,7 @@ class HEPv2LoadAnnotations(BaseTransform):
         self.with_label = with_label
         self.with_phithe = with_phithe
         self.with_mmt = with_mmt
+        self.with_mmt_label = with_mmt_label
 
         self.box_type = None
 
@@ -222,6 +224,14 @@ class HEPv2LoadAnnotations(BaseTransform):
 
         results['gt_mmt_regs'] = np.array(gt_mmt_regs, dtype=np.float32).reshape((-1, 1))
 
+    def _load_mmt_labels(self, results: dict) -> None:
+        gt_mmt_labels = []
+        for instance in results.get('instances', []):
+            gt_mmt_labels.append(instance['p_RM_label'])
+        # TODO: Inconsistent with mmcv, consider how to deal with it later.
+        results['gt_mmt_labels'] = np.array(
+            gt_mmt_labels, dtype=np.int64)
+
     def transform(self, results: dict) -> dict:
         """Function to load multiple types annotations.
 
@@ -242,6 +252,8 @@ class HEPv2LoadAnnotations(BaseTransform):
             self._load_phithes(results)
         if self.with_mmt:
             self._load_mmts(results)
+        if self.with_mmt_label:
+            self._load_mmt_labels(results)
         return results
 
     def __repr__(self) -> str:
@@ -250,6 +262,7 @@ class HEPv2LoadAnnotations(BaseTransform):
         repr_str += f'with_label={self.with_label}, '
         repr_str += f'with_phithe={self.with_phithe}, '
         repr_str += f'with_mmt={self.with_mmt}, '
+        repr_str += f'with_mmt_label={self.with_mmt_label}, '
         repr_str += f'backend_args={self.backend_args})'
 
         return repr_str
@@ -263,6 +276,7 @@ class HEPv2PackDetInputs(BaseTransform):
         'gt_bboxes_labels': 'labels',
         'gt_phithe_regs': 'phithe_regs',
         'gt_mmt_regs': 'mmt_regs',
+        'gt_mmt_labels': 'mmt_labels',
     }
 
     def __init__(self,

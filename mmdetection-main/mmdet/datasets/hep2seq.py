@@ -50,10 +50,9 @@ class Hep2SeqDataset(BaseDetDataset):
 
     def __init__(self,
                  *args,
-                 # limit_num_classes: Union[int, List[int]] = 2,
                  limit_num_classes: int = 2,
                  mmt_min: float = 0.0,
-                 mmt_max: float = 2.0,
+                 mmt_max: float = 1.2,
                  **kwargs) -> None:
         self.limit_num_classes = limit_num_classes  # limitation for num_classes
         self.mmt_min = mmt_min
@@ -162,12 +161,6 @@ class Hep2SeqDataset(BaseDetDataset):
             bbox = [x1, y1, x1 + w, y1 + h]
 
             # NEW!
-            # if isinstance(self.limit_num_classes, int):
-            #     valid_cat_ids = [i + 1 for i in range(self.limit_num_classes)]
-            # else:
-            #     valid_cat_ids = self.limit_num_classes
-            # if ann['category_id'] not in valid_cat_ids:
-            #     continue
             if ann['category_id'] > self.limit_num_classes:
                 continue
             if ann['p_RM'] < self.mmt_min or ann['p_RM'] > self.mmt_max:
@@ -190,6 +183,8 @@ class Hep2SeqDataset(BaseDetDataset):
             instance['p_RM'] = ann['p_RM']
             instance['phi_RM'] = ann['phi_RM']
             instance['the_RM'] = ann['the_RM']
+
+            instance['p_RM_label'] = int(ann['p_RM'] / 0.1)
 
             instances.append(instance)
         data_info['instances'] = instances

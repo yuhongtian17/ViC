@@ -149,6 +149,8 @@ train_dataset_base = dict(
     # ann_file='annotations/instances_train2017.json',
     # data_prefix=dict(img='train2017/'),
     ann_file='',
+    mmt_min=0.0,
+    mmt_max=1.2,
     data_prefix=dict(img='./'),
     filter_cfg=dict(filter_empty_gt=True, min_size=32),
     pipeline=train_pipeline,
