@@ -1,17 +1,15 @@
 # Vision Calorimeter (ViC) and Anti-Neutron Transformer (ANT)
 
-## Vision Calorimeter: Migrating Visual Object Detectors to High-Energy Particle Images
+## Vision Calorimeter for High-Energy Particle Detection
 
 <div align=center><img src="./figures/vic_figure_1.png"></div>
 
-In the field of high-energy physics, accurately estimating the kinematic parameters (position and momentum) of anti-neutrons ($\bar{n}$) is crucial for exploring the fundamental governing principles.
-However, this process is particularly challenging with discrete and scattered energy information when using an electromagnetic calorimeter (EMC) as the detector.
-To address this issue, we propose Vision Calorimeter (ViC), a data-driven framework which migrates visual object detection techniques to high-energy particle images.
-To accommodate the unique characteristics of particle images, we introduce the heat-conduction operator (HCO) into the backbone and the head of conventional object detector, along with significant structural improvements.
-HCO enjoys advantages of both radial prior and global attention, as it is inspired by physical heat conduction which naturally aligns with the pattern of particle incidence.
-Implemented via the Discrete Cosine Transform (DCT), HCO extracts frequency-domain features, bridging the distribution gap between particle images and natural images where visual object detectors are pre-trained.
-Experiments demonstrate that ViC significantly outperforms conventional approaches, reducing the incident position prediction error by 46.16\% (from 17.31° to 9.32°) and providing the first baseline result with an incident momentum regression error of 21.48\%.
-This study underscores ViC's great potential as a general-purpose particle parameter estimator for high-energy physics.
+In high-energy physics, estimating anti-neutron parameters (position and momentum) using the electromagnetic calorimeter (EMC) is crucial but challenging.
+To conquer this challenge, we propose Vision Calorimeter (ViC), a framework that migrates visual object detectors to analyze particle images.
+The motivation lies in introducing a physics-inspired heat-conduction operator (HCO) into the detector's backbone and head to handle the discrete and sparse patterns of these images.
+Implemented via the Discrete Cosine Transform, HCO extracts frequency-domain features, bridging the distribution gap between natural and particle images.
+Experiments demonstrate that ViC significantly outperforms conventional methods, reducing the incident position prediction error by 46.16\% (from 17.31° to 9.32°) and providing the first baseline result with an incident momentum regression error of 21.48\%.
+This study underscores ViC's great potential as a reliable particle detector for high-energy physics.
 Code is available at https://github.com/yuhongtian17/ViC.
 
 ## Anti-Neutron Transformer for High-Energy Particle Detection
@@ -44,10 +42,10 @@ wget https://developer.download.nvidia.com/compute/cuda/12.4.1/local_installers/
 chmod +x ./cuda_12.4.1_550.54.15_linux.run
 sudo sh cuda_12.4.1_550.54.15_linux.run
 
-vi ~/.bashrc
 # Add CUDA path
-# export PATH=/usr/local/cuda-12.4/bin:$PATH
-# export LD_LIBRARY_PATH=/usr/local/cuda-12.4/lib64:$LD_LIBRARY_PATH
+echo "export PATH=/usr/local/cuda-12.4/bin:\$PATH" >> ~/.bashrc
+echo "export LD_LIBRARY_PATH=/usr/local/cuda-12.4/lib64:\$LD_LIBRARY_PATH" >> ~/.bashrc
+echo "" >> ~/.bashrc
 source ~/.bashrc
 nvcc -V
 
@@ -61,6 +59,7 @@ conda activate openmmlab241b
 # ref: https://pytorch.org/get-started/previous-versions/#v241
 conda install pytorch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 pytorch-cuda=12.4 -c pytorch -c nvidia
 
+pip install pip==24.3.1 --index https://pypi.tuna.tsinghua.edu.cn/simple/
 pip install numpy==1.26.4 ninja==1.11.1.1 psutil==6.1.0 --index https://pypi.tuna.tsinghua.edu.cn/simple/
 pip install matplotlib==3.9.3 opencv-python==4.10.0.84 cython==3.0.11 --index https://pypi.tuna.tsinghua.edu.cn/simple/
 
@@ -75,6 +74,7 @@ wget https://github.com/open-mmlab/mmdetection/archive/refs/tags/v3.3.0.zip -O m
 unzip mmdetection-3.3.0.zip
 cd mmdetection-3.3.0/
 
+# Modify Line 9 in "./mmdet/__init__.py" to >>> mmcv_maximum_version = '3.0.0'
 pip install -v -e . --index https://pypi.tuna.tsinghua.edu.cn/simple/
 
 # IF MSCOCO2017 Dataset does not exist

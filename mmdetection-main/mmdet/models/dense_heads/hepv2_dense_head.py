@@ -891,7 +891,7 @@ class HEPv2DenseHead(BaseDenseHead):
             raise NotImplementedError
 
         keep_idxs = self.nms_for_phithe(
-            max_scores, decoded_phithe, priors,
+            max_scores, max_labels, decoded_phithe, # priors,
             self.phithe_nms_thr, self.score_thr, self.max_per_img, device)
 
         results = InstanceData()
@@ -904,15 +904,16 @@ class HEPv2DenseHead(BaseDenseHead):
         return results
 
     def nms_for_phithe(self,
-                       scores, phithe_preds, priors,
+                       scores, labels, phithe_preds, # priors,
                        phithe_nms_thr, score_thr, max_per_img, device):
         """
         张量化实现的NMS操作，基于phi/theta坐标
 
         Args:
             scores: torch.Tensor [N] 置信度
+            labels: torch.Tensor [N] 类别标签
             phithe_preds: torch.Tensor [N, 2] phi和theta预测值
-            priors: torch.Tensor [N, 2] phi和theta先验值
+            # priors: torch.Tensor [N, 2] phi和theta先验值
             phithe_nms_thr: float NMS阈值
             score_thr: float 置信度阈值
             max_per_img: int 每张图片最大保留数
@@ -924,8 +925,9 @@ class HEPv2DenseHead(BaseDenseHead):
 
         # 对scores进行降序排列，并按这个排列索引重排对应的phithe_preds和priors
         sorted_scores, sorted_indices = torch.sort(scores, descending=True)
+        sorted_labels = labels[sorted_indices]
         sorted_phithe_preds = phithe_preds[sorted_indices]
-        sorted_priors = priors[sorted_indices]
+        # sorted_priors = priors[sorted_indices]
 
         keep_mask = torch.ones(N, dtype=torch.bool, device=device)
         keep_num = 0
@@ -949,24 +951,39 @@ class HEPv2DenseHead(BaseDenseHead):
                 break
 
             # 类似于NMS操作的：
-            # 对于一个score值对应的一对(phi_pred_high, the_pred_high)值和一对(phi_priors_high, the_prior_high)值，
-            # 遍历所有更小score值对应的(phi_pred_low, the_pred_low)值和(phi_priors_low, the_prior_low)值，
-            #     如果满足abs(phi_priors_low-phi_priors_high)<phithe_nms_thr & abs(the_priors_low-the_priors_high)<phithe_nms_thr，
-            #         那么如果它同时满足abs(phi_pred_low-phi_pred_high)<phithe_nms_thr*2 & abs(the_pred_low-the_pred_high)<phithe_nms_thr*2，
-            #             则其keep_mask标记为False；
-            #     如果不满足，
-            #         那么如果它同时满足abs(phi_pred_low-phi_pred_high)<phithe_nms_thr & abs(the_pred_low-the_pred_high)<phithe_nms_thr，
+            # 对于一个score值对应的一对(phi_pred_high, the_pred_high)值和label_high值，
+            # 遍历所有更小score值对应的(phi_pred_low, the_pred_low)值和label_low值，
+            #     如果满足label_high==label_low，
+            #         且同时满足abs(phi_pred_low-phi_pred_high)<phithe_nms_thr & abs(the_pred_low-the_pred_high)<phithe_nms_thr，
             #             则其keep_mask标记为False。
-            phi_priors_diff = torch.abs(sorted_priors[i+1:, 0] - sorted_priors[i, 0])
-            the_priors_diff = torch.abs(sorted_priors[i+1:, 1] - sorted_priors[i, 1])
+            label_diff = torch.abs(sorted_labels[i+1:] - sorted_labels[i])
             phi_pred_diff = torch.abs(sorted_phithe_preds[i+1:, 0] - sorted_phithe_preds[i, 0])
             the_pred_diff = torch.abs(sorted_phithe_preds[i+1:, 1] - sorted_phithe_preds[i, 1])
 
-            prior_close = (phi_priors_diff < phithe_nms_thr) & (the_priors_diff < phithe_nms_thr)
-            pred_close_2x = (phi_pred_diff < phithe_nms_thr * 2) & (the_pred_diff < phithe_nms_thr * 2)
-            pred_close_1x = (phi_pred_diff < phithe_nms_thr) & (the_pred_diff < phithe_nms_thr)
+            label_close = (label_diff < self.eps)
+            pred_close = (phi_pred_diff < phithe_nms_thr) & (the_pred_diff < phithe_nms_thr)
 
-            suppress = (prior_close & pred_close_2x) | (~prior_close & pred_close_1x)
+            suppress = (label_close & pred_close)
+
+            # # 对于一个score值对应的一对(phi_pred_high, the_pred_high)值和一对(phi_priors_high, the_prior_high)值，
+            # # 遍历所有更小score值对应的(phi_pred_low, the_pred_low)值和(phi_priors_low, the_prior_low)值，
+            # #     如果满足abs(phi_priors_low-phi_priors_high)<phithe_nms_thr & abs(the_priors_low-the_priors_high)<phithe_nms_thr，
+            # #         那么如果它同时满足abs(phi_pred_low-phi_pred_high)<phithe_nms_thr*2 & abs(the_pred_low-the_pred_high)<phithe_nms_thr*2，
+            # #             则其keep_mask标记为False；
+            # #     如果不满足，
+            # #         那么如果它同时满足abs(phi_pred_low-phi_pred_high)<phithe_nms_thr & abs(the_pred_low-the_pred_high)<phithe_nms_thr，
+            # #             则其keep_mask标记为False。
+            # phi_priors_diff = torch.abs(sorted_priors[i+1:, 0] - sorted_priors[i, 0])
+            # the_priors_diff = torch.abs(sorted_priors[i+1:, 1] - sorted_priors[i, 1])
+            # phi_pred_diff = torch.abs(sorted_phithe_preds[i+1:, 0] - sorted_phithe_preds[i, 0])
+            # the_pred_diff = torch.abs(sorted_phithe_preds[i+1:, 1] - sorted_phithe_preds[i, 1])
+
+            # prior_close = (phi_priors_diff < phithe_nms_thr) & (the_priors_diff < phithe_nms_thr)
+            # pred_close_2x = (phi_pred_diff < phithe_nms_thr * 2) & (the_pred_diff < phithe_nms_thr * 2)
+            # pred_close_1x = (phi_pred_diff < phithe_nms_thr) & (the_pred_diff < phithe_nms_thr)
+
+            # suppress = (prior_close & pred_close_2x) | (~prior_close & pred_close_1x)
+
             # 保留已标记的False，新增~suppress标记的False
             keep_mask[i+1:] = keep_mask[i+1:] & (~suppress)
 
