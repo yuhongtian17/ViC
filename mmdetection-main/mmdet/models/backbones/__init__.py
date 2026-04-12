@@ -21,6 +21,7 @@ from .trident_resnet import TridentResNet
 from .vheat_model import MMDET_VHEAT
 from .hepv2_transformer import HEPv2Transformer
 from projects.ViTDet.vitdet.layer_decay_optimizer_constructor import LayerDecayOptimizerConstructor
+from .hepv3_transformer import HEPv3Transformer
 
 __all__ = [
     'RegNet', 'ResNet', 'ResNetV1d', 'ResNeXt', 'SSDVGG', 'HRNet',
@@ -32,4 +33,5 @@ __all__ = [
     'MMDET_VHEAT',
     'HEPv2Transformer',
     'LayerDecayOptimizerConstructor',
+    'HEPv3Transformer',
 ]

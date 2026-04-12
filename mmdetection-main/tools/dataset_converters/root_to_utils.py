@@ -1,6 +1,4 @@
 import datetime
-from typing import Optional
-
 import numpy as np
 import mmcv
 
@@ -39,7 +37,7 @@ def str_to_numbers(
 
 def create_bg_np(
     h, w, c,
-    bg_version: Optional[str] = None,
+    bg_version: str = 'black_randn',
     snr_db: float = 10.0,
 ) -> np.ndarray:
     # mean & std from ImageNet:
@@ -66,29 +64,46 @@ def create_bg_np(
     return img_np
 
 
-def eng_to_rgb_np(eng):
+def eng_to_rgb_np(eng, manual_rgb=True):
     # if not isinstance(eng, np.ndarray):
     #     eng = np.array([eng])
 
     eng_log10 = np.log10(eng)
 
-    index_low  = (eng_log10 <  -2.3)                                                    # 小于5e-3 GeV
-    index_mid  = (eng_log10 >= -2.3) & (eng_log10 <  -1.3)
-    index_high =                       (eng_log10 >= -1.3)                              # 大于5e-2 GeV
+    if manual_rgb:
+        thresh_min = -3.3
+    else:
+        thresh_min = np.log10(5e-4)
+
+    thresh_low = thresh_min + 1.0
+    thresh_high = thresh_min + 2.0
+
+    index_low  = (eng_log10 <  thresh_low)                                                          # 小于5e-3 GeV
+    index_mid  = (eng_log10 >= thresh_low) & (eng_log10 <  thresh_high)
+    index_high =                             (eng_log10 >= thresh_high)                             # 大于5e-2 GeV
 
     r = np.zeros_like(eng)
     g = np.zeros_like(eng)
     b = np.zeros_like(eng)
 
     if index_low.any():
-        rgb_norm =   np.clip((eng_log10[index_low] + 3.3), a_min=0, a_max=1) ** 0.5     # [-3.3, -2.3) -> [0, 1)
+        if manual_rgb:
+            rgb_norm =   np.clip((eng_log10[index_low] - thresh_min), a_min=0, a_max=1) ** 0.5      # [-3.3, -2.3) -> [0, 1)
+        else:
+            rgb_norm =            eng_log10[index_low] - thresh_min
         b[index_low]  = rgb_norm * 255 + 1
     if index_mid.any():
-        rgb_norm =           (eng_log10[index_mid] + 2.3)                    ** 0.6     # [-2.3, -1.3) -> [0, 1)
+        if manual_rgb:
+            rgb_norm =           (eng_log10[index_mid] - thresh_low)                    ** 0.6      # [-2.3, -1.3) -> [0, 1)
+        else:
+            rgb_norm =            eng_log10[index_mid] - thresh_low
         g[index_mid]  = rgb_norm * 255 + 1
     if index_high.any():
-        #                                    in rad: np.arctan(3) = 1.2490457723982544
-        rgb_norm = np.arctan((eng_log10[index_high] + 1.3) * 2.5) / 1.2490457723982544  # [-1.3, -0.1) -> [0, 1)
+        if manual_rgb:
+            #                                    in rad: np.arctan(3) = 1.2490457723982544
+            rgb_norm = np.arctan((eng_log10[index_high] - thresh_high) * 2.5) / 1.2490457723982544  # [-1.3, -0.1) -> [0, 1)
+        else:
+            rgb_norm =            eng_log10[index_high] - thresh_high
         r[index_high] = rgb_norm * 255 + 1
 
     return r, g, b
@@ -96,8 +111,9 @@ def eng_to_rgb_np(eng):
 
 def load_rgb(
     single_image: dict,
-    bg_version: Optional[str] = None,
+    bg_version: str = 'black_randn',
     snr_db: float = 10.0,
+    manual_rgb: bool = True,
 ) -> np.ndarray:
     """
     加载RGB值。要求：
@@ -118,7 +134,7 @@ def load_rgb(
     m_eng = single_image['m_eng']
     xyxy = single_image['xyxy']
 
-    r_array, g_array, b_array = eng_to_rgb_np(np.array(m_eng))  # Here `m_eng` is a list!
+    r_array, g_array, b_array = eng_to_rgb_np(np.array(m_eng), manual_rgb)  # Here `m_eng` is a list!
 
     for i in range(n_hit):
         r, g, b = r_array[i], g_array[i], b_array[i]

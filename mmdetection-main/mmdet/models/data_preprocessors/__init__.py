@@ -7,6 +7,7 @@ from .reid_data_preprocessor import ReIDDataPreprocessor
 from .track_data_preprocessor import TrackDataPreprocessor
 
 from .hepv2_data_preprocessor import HEPv2DataPreprocessor
+from .hepv3_data_preprocessor import HEPv3DataPreprocessor
 
 __all__ = [
     'DetDataPreprocessor', 'BatchSyncRandomResize', 'BatchFixedSizePad',
@@ -14,4 +15,5 @@ __all__ = [
     'TrackDataPreprocessor', 'ReIDDataPreprocessor',
 
     'HEPv2DataPreprocessor',
+    'HEPv3DataPreprocessor',
 ]

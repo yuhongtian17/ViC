@@ -53,13 +53,15 @@ class LoadImageFromHEP(LoadImageFromFile):
     def __init__(self,
                  # https://github.com/open-mmlab/mmcv/blob/main/mmcv/transforms/loading.py
                  to_float32: bool = True,
-                 bg_version: Optional[str] = None,
+                 bg_version: str = 'black_randn',
                  snr_db: float = 10.0,
+                 manual_rgb: bool = True,
                  **kwargs) -> None:
         super().__init__(to_float32=to_float32, **kwargs)
 
         self.bg_version = bg_version
         self.snr_db = snr_db
+        self.manual_rgb = manual_rgb
 
     def transform(self, results: dict) -> dict:
         """Transform function to add image meta information.
@@ -77,6 +79,7 @@ class LoadImageFromHEP(LoadImageFromFile):
             single_image = results,
             bg_version = self.bg_version,
             snr_db = self.snr_db,
+            manual_rgb = self.manual_rgb,
         )
         if self.to_float32:
             img = img.astype(np.float32)

@@ -1,18 +1,16 @@
 # Copyright (c) OpenMMLab. All rights reserved.
-from typing import Optional, Sequence
-
 import numpy as np
-from mmcv.transforms import to_tensor
-from mmcv.transforms.base import BaseTransform
-from mmengine.structures import InstanceData, PixelData
 
+from mmengine.structures import InstanceData, PixelData
+from mmcv.transforms import to_tensor
+from mmcv.transforms import BaseTransform
 from mmdet.registry import TRANSFORMS
-from mmdet.structures import DetDataSample, ReIDDataSample, TrackDataSample
+from mmdet.structures import DetDataSample
 from mmdet.structures.bbox import BaseBoxes
 
 
 @TRANSFORMS.register_module()
-class PackDetInputs(BaseTransform):
+class HEPv3PackDetInputs(BaseTransform):
     """Pack the inputs data for the detection / semantic segmentation /
     panoptic segmentation.
 
@@ -44,12 +42,16 @@ class PackDetInputs(BaseTransform):
     mapping_table = {
         'gt_bboxes': 'bboxes',
         'gt_bboxes_labels': 'labels',
-        'gt_masks': 'masks'
+        'gt_masks': 'masks',
+        'gt_phithe_regs': 'phithe_regs',
+        'gt_mmt_regs': 'mmt_regs',
+        'gt_mmt_labels': 'mmt_labels',
     }
 
     def __init__(self,
                  meta_keys=('img_id', 'img_path', 'ori_shape', 'img_shape',
-                            'scale_factor', 'flip', 'flip_direction')):
+                            'scale_factor', 'flip', 'flip_direction',
+                            'n_hit_all', 'm_phi_all', 'm_the_all')):
         self.meta_keys = meta_keys
 
     def transform(self, results: dict) -> dict:
@@ -66,6 +68,10 @@ class PackDetInputs(BaseTransform):
                 sample.
         """
         packed_results = dict()
+
+        seq = results['seq']
+        packed_results['inputs_seq'] = to_tensor(seq).contiguous()
+
         if 'img' in results:
             img = results['img']
             if len(img.shape) < 3:
@@ -133,8 +139,10 @@ class PackDetInputs(BaseTransform):
 
         img_meta = {}
         for key in self.meta_keys:
-            if key in results:
-                img_meta[key] = results[key]
+            assert key in results, f'`{key}` is not found in `results`, ' \
+                f'the valid keys are {list(results)}.'
+            img_meta[key] = results[key]
+
         data_sample.set_metainfo(img_meta)
         packed_results['data_samples'] = data_sample
 

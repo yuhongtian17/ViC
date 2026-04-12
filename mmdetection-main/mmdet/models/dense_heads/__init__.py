@@ -59,6 +59,8 @@ from .hepv2_dense_head import HEPv2DenseHead
 from .hepv2_selfsup_cls_head import HEPv2SelfSupervisorCLSHead
 from .hepv2_selfsup_reg_head import HEPv2SelfSupervisorREGHead
 
+from .hepv3_retina_head import HEPv3RetinaHead
+
 __all__ = [
     'AnchorFreeHead', 'AnchorHead', 'GuidedAnchorHead', 'FeatureAdaption',
     'RPNHead', 'GARPNHead', 'RetinaHead', 'RetinaSepBNHead', 'GARetinaHead',
@@ -81,4 +83,6 @@ __all__ = [
     'HEPv2DenseHead',
     'HEPv2SelfSupervisorCLSHead',
     'HEPv2SelfSupervisorREGHead',
+
+    'HEPv3RetinaHead',
 ]

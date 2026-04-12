@@ -12,7 +12,7 @@ from mmengine.runner.checkpoint import CheckpointLoader
 
 from mmdet.registry import MODELS
 
-from typing import Optional
+from typing import Union
 import torch.utils.checkpoint as cp
 
 
@@ -137,200 +137,48 @@ class Block(nn.Module):
         return x
 
 
-class TokenEmbed_engtime(nn.Module):
+class TokenEmbed(nn.Module):
 
     def __init__(self,
-                 num_embeds_eng=768,
-                 num_embeds_time=1,
-                 embed_dim=768,
-                 eng_min=5e-4,
-                 eng_max=2.0,
-                 eps=1e-6):
-        super().__init__()
-
-        self.num_embeds_eng = num_embeds_eng
-        self.num_embeds_time = num_embeds_time
-        self.eng_min = eng_min
-        self.eng_max = eng_max
-        self.eps = eps
-
-        self.embed_layer = nn.Embedding(num_embeds_eng * num_embeds_time, embed_dim)
-
-    def forward(self, x_eng: torch.Tensor, x_time: torch.Tensor):
-        log10_ind = torch.clamp(
-            torch.log10(x_eng / self.eng_min) / math.log10(self.eng_max / self.eng_min),
-            min=0, max=1-self.eps,
-        ) * self.num_embeds_eng
-
-        log10_ind += torch.clamp(
-            x_time,
-            min=0, max=self.num_embeds_time-self.eps,
-        ) * self.num_embeds_eng
-
-        log10_ind = log10_ind.to(dtype=torch.long)
-        return self.embed_layer(log10_ind)
-
-
-class TokenEmbed_phithe(nn.Module):
-
-    def __init__(self, embed_dim=768):
-        super().__init__()
-
-        self.width = 960
-        self.height = 480
-        self.num_embeds_grid = 7008
-
-        self.embed_layer = nn.Embedding(self.num_embeds_grid, embed_dim)
-
-    def forward(self, x_phi: torch.Tensor, x_the: torch.Tensor):
-        B, N = x_phi.shape
-        x_phi = x_phi.flatten()
-        x_the = x_the.flatten().unsqueeze(-1)
-        local_device = x_phi.device
-
-        w_px = torch.tensor([
-            30, 30, 24, 24, 20, 20,         # empty
-            20,                             # empty
-            15, 15, 12, 12, 10, 10, 
-            10,                             # empty
-            8, 8, 8, 8, 8, 
-            8, 8, 8, 8, 
-            8, 8, 8, 8, 8, 
-            8, 8, 8, 8, 8, 8, 8, 8, 
-            8, 8, 8, 8, 8, 8, 8, 8, 
-            8, 8, 8, 8, 8, 
-            8, 8, 8, 8, 
-            8, 8, 8, 8, 8, 
-            10,                             # empty
-            10, 10, 12, 12, 15, 15, 
-            20,                             # empty
-            20, 20, 24, 24, 30, 30,         # empty
-        ], device=local_device)
-        h_px = torch.tensor([
-            8, 8, 8, 8, 7, 7,               # empty
-            7,                              # empty
-            6, 6, 6, 6, 5, 5, 
-            5,                              # empty
-            5, 5, 5, 5, 5, 
-            6, 6, 6, 6, 
-            7, 7, 7, 7, 7, 
-            8, 8, 8, 8, 8, 8, 8, 8, 
-            8, 8, 8, 8, 8, 8, 8, 8, 
-            7, 7, 7, 7, 7, 
-            6, 6, 6, 6, 
-            5, 5, 5, 5, 5, 
-            5,                              # empty
-            5, 5, 6, 6, 6, 6, 
-            7,                              # empty
-            7, 7, 8, 8, 8, 8,               # empty
-        ], device=local_device)
-        hh_px_2D = torch.tensor([[
-            8, 16, 24, 32, 39, 46, 
-            53, 
-            59, 65, 71, 77, 82, 87, 
-            92, 
-            97, 102, 107, 112, 117, 
-            123, 129, 135, 141, 
-            148, 155, 162, 169, 176, 
-            184, 192, 200, 208, 216, 224, 232, 240, 
-            248, 256, 264, 272, 280, 288, 296, 304, 
-            311, 318, 325, 332, 339, 
-            345, 351, 357, 363, 
-            368, 373, 378, 383, 388, 
-            393, 
-            398, 403, 409, 415, 421, 427, 
-            434, 
-            441, 448, 456, 464, 472, 480, 
-        ]], device=local_device)
-
-        sum_grids = torch.tensor([
-            0,
-            32, 64, 104, 144, 192, 240,
-            288,
-            352, 416, 496, 576, 672, 768,
-            864,
-            984, 1104, 1224, 1344, 1464,
-            1584, 1704, 1824, 1944,
-            2064, 2184, 2304, 2424, 2544,
-            2664, 2784, 2904, 3024, 3144, 3264, 3384, 3504,
-            3624, 3744, 3864, 3984, 4104, 4224, 4344, 4464,
-            4584, 4704, 4824, 4944, 5064,
-            5184, 5304, 5424, 5544,
-            5664, 5784, 5904, 6024, 6144,
-            6240,
-            6336, 6432, 6512, 6592, 6656, 6720,
-            6768,
-            6816, 6864, 6904, 6944, 6976, 7008, 
-        ], device=local_device)
-
-        half_width = self.width * 0.5
-        x_ctr_1D = x_phi / torch.pi * half_width + half_width
-        y_ctr_2D = x_the / torch.pi * self.height
-        ind = torch.sum((y_ctr_2D - hh_px_2D) >= 0, dim=1)
-        grid_ind = (x_ctr_1D / w_px[ind] + sum_grids[ind]).reshape(B, N).to(dtype=torch.long)
-
-        return self.embed_layer(grid_ind)
-
-
-class TokenEmbed_eng(nn.Module):
-
-    def __init__(self,
-                 num_embeds=768,
-                 embed_dim=768,
-                 eng_min=5e-4,
-                 eng_max=2.0,
-                 eps=1e-6):
+                 num_embeds: int = 768,
+                 embed_dim: int = 768,
+                 num_min: float = 5e-4,
+                 num_max: float = 2.0,
+                 log_base: float = 10.0,
+                 eps: float = 1e-6):
         super().__init__()
 
         self.num_embeds = num_embeds
-        self.eng_min = eng_min
-        self.eng_max = eng_max
+        self.num_min = num_min
+        self.num_max = num_max
+        self.log_base = log_base
         self.eps = eps
 
         self.embed_layer = nn.Embedding(num_embeds, embed_dim)
 
+    def logba(self, base: float, a: Union[float, torch.Tensor]):
+        if isinstance(a, (int, float)):
+            a = max(a, self.eps)
+            return math.log10(a) / math.log10(base)
+        else:
+            a = torch.clamp(a, min=self.eps)
+            return torch.log10(a) / math.log10(base)
+
     def forward(self, x: torch.Tensor):
-        log10_ind = torch.clamp(
-            torch.log10(x / self.eng_min) / math.log10(self.eng_max / self.eng_min),
+        if self.log_base > 0:
+            num_min = self.logba(self.log_base, self.num_min)
+            num_max = self.logba(self.log_base, self.num_max)
+            x = self.logba(self.log_base, x)
+        else:
+            num_min = self.num_min
+            num_max = self.num_max
+
+        ind = torch.clamp(
+            (x - num_min) / (num_max - num_min),
             min=0, max=1-self.eps,
         ) * self.num_embeds
 
-        log10_ind = log10_ind.to(dtype=torch.long)
-        return self.embed_layer(log10_ind)
-
-
-class TokenEmbed_rad(nn.Module):
-
-    def __init__(self,
-                 num_embeds=360,
-                 embed_dim=384,
-                 rad_min=-torch.pi,
-                 rad_max=torch.pi,
-                 eps=1e-6):
-        super().__init__()
-
-        self.num_embeds = num_embeds
-        self.rad_min = rad_min
-        self.rad_max = rad_max
-        self.eps = eps
-
-        self.embed_layer = nn.Embedding(num_embeds, embed_dim)
-
-    def forward(self, x: torch.Tensor):
-        ind = (x - self.rad_min) / (self.rad_max - self.rad_min) % 1.0 * self.num_embeds
         ind = ind.to(dtype=torch.long)
-        return self.embed_layer(ind)
-
-
-class TokenEmbed_time(nn.Module):
-
-    def __init__(self, num_embeds=21, embed_dim=21):
-        super().__init__()
-
-        self.embed_layer = nn.Embedding(num_embeds, embed_dim)
-
-    def forward(self, x: torch.Tensor):
-        ind = x.to(dtype=torch.long)
         return self.embed_layer(ind)
 
 
@@ -362,9 +210,9 @@ class HEPv2Transformer(BaseModule):
         super().__init__()
         self.init_cfg = init_cfg
 
-        self.token_embed_eng = TokenEmbed_eng(num_embeds_engphithe[0], embed_dim_engphithe[0])
-        self.token_embed_phi = TokenEmbed_rad(num_embeds_engphithe[1], embed_dim_engphithe[1], -torch.pi, torch.pi)
-        self.token_embed_the = TokenEmbed_rad(num_embeds_engphithe[2], embed_dim_engphithe[2], 0, torch.pi)
+        self.token_embed_eng = TokenEmbed(num_embeds_engphithe[0], embed_dim_engphithe[0])
+        self.token_embed_phi = TokenEmbed(num_embeds_engphithe[1], embed_dim_engphithe[1], -torch.pi, torch.pi, log_base=0)
+        self.token_embed_the = TokenEmbed(num_embeds_engphithe[2], embed_dim_engphithe[2], 0, torch.pi, log_base=0)
 
         self.use_mmt_token = use_mmt_token
         if self.use_mmt_token:
@@ -432,12 +280,12 @@ class HEPv2Transformer(BaseModule):
         outs_others['x'] = x.clone()
 
         B, N, C = x.shape
-        assert C == 5                                                           # flags, eng, phi, the, time
         flags = x[..., 0:1]
         x_eng = x[..., 1]
         x_phi = x[..., 2]
         x_the = x[..., 3]
         # x_time = x[..., 4]
+        # x_grid = x[..., 5:7]
         flags_0 = x[..., 0]
 
         y_eng = self.token_embed_eng(x_eng)

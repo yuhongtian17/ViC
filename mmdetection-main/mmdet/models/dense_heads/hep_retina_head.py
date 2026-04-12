@@ -1354,6 +1354,7 @@ class HEPRetinaHead(AnchorHead):
         mlvl_valid_priors = []
         mlvl_mmt_preds = []                                                                         # mmt
         mlvl_mmt_labels = []                                                                        # mmt_label
+        mlvl_mmt_scores = []                                                                        # mmt_label
         mlvl_scores = []
         mlvl_labels = []
         if with_score_factors:
@@ -1383,9 +1384,10 @@ class HEPRetinaHead(AnchorHead):
 
             if self.use_mmt_label:                                                                  # mmt_label
                 mmt_label_score = mmt_label_score.permute(1, 2, 0).reshape(-1, self.mmt_label_channels)
-                mmt_label_score_max, mmt_label = torch.max(mmt_label_score, dim=-1)
+                mmt_score, mmt_label = torch.max(mmt_label_score.sigmoid(), dim=-1)
             else:
                 mmt_label = torch.zeros((len(bbox_pred), ), dtype=torch.long, device=bbox_pred.device)
+                mmt_score = torch.zeros((len(bbox_pred), ), dtype=torch.float, device=bbox_pred.device)
 
             if with_score_factors:
                 score_factor = score_factor.permute(1, 2,
@@ -1416,6 +1418,7 @@ class HEPRetinaHead(AnchorHead):
             priors = filtered_results['priors']
             mmt_reg_pred = mmt_reg_pred[keep_idxs]                                                  # mmt
             mmt_label = mmt_label[keep_idxs]                                                        # mmt_label
+            mmt_score = mmt_score[keep_idxs]                                                        # mmt_label
 
             if with_score_factors:
                 score_factor = score_factor[keep_idxs]
@@ -1424,6 +1427,7 @@ class HEPRetinaHead(AnchorHead):
             mlvl_valid_priors.append(priors)
             mlvl_mmt_preds.append(mmt_reg_pred)                                                     # mmt
             mlvl_mmt_labels.append(mmt_label)                                                       # mmt_label
+            mlvl_mmt_scores.append(mmt_score)                                                       # mmt_label
             mlvl_scores.append(scores)
             mlvl_labels.append(labels)
 
@@ -1450,6 +1454,7 @@ class HEPRetinaHead(AnchorHead):
         results.bboxes = bboxes
         results.mmts = mmts                                                                         # mmt
         results.mmt_labels = torch.cat(mlvl_mmt_labels)                                             # mmt_label
+        results.mmt_scores = torch.cat(mlvl_mmt_scores)                                             # mmt_label
         results.scores = torch.cat(mlvl_scores)
         results.labels = torch.cat(mlvl_labels)
         if with_score_factors:

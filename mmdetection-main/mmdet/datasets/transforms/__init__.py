@@ -28,6 +28,7 @@ from .hep2coco_loading import LoadImageFromHEP, HEPLoadAnnotations, HEPPackDetIn
 from .hep2coco_transforms import RandomCyclicShift
 from .hep2seq_loading import (LoadSeqFromHEPv2, HEPv2LoadAnnotations, HEPv2PackDetInputs,
                               HEPv2PackInputs)
+from .hep2rep_loading import HEPv3PackDetInputs
 
 __all__ = [
     'PackDetInputs', 'ToTensor', 'ImageToTensor', 'Transpose',
@@ -52,4 +53,5 @@ __all__ = [
     'RandomCyclicShift',
     'LoadSeqFromHEPv2', 'HEPv2LoadAnnotations', 'HEPv2PackDetInputs',
     'HEPv2PackInputs',
+    'HEPv3PackDetInputs',
 ]

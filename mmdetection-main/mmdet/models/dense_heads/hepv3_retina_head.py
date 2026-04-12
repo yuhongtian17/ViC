@@ -1,51 +1,4 @@
 # # Copyright (c) OpenMMLab. All rights reserved.
-# import copy
-# from abc import ABCMeta, abstractmethod
-# from inspect import signature
-# from typing import List, Optional, Tuple
-
-# import torch
-# from mmcv.ops import batched_nms
-# from mmengine.config import ConfigDict
-# from mmengine.model import BaseModule, constant_init
-# from mmengine.structures import InstanceData
-# from torch import Tensor
-
-# from mmdet.structures import SampleList
-# from mmdet.structures.bbox import (cat_boxes, get_box_tensor, get_box_wh,
-#                                    scale_boxes)
-# from mmdet.utils import InstanceList, OptMultiConfig
-# from ..test_time_augs import merge_aug_results
-# from ..utils import (filter_scores_and_topk, select_single_mlvl,
-#                      unpack_gt_instances)
-
-# # Copyright (c) OpenMMLab. All rights reserved.
-# import warnings
-# from typing import List, Optional, Tuple, Union
-
-# import torch
-# import torch.nn as nn
-# from mmengine.structures import InstanceData
-# from torch import Tensor
-
-# from mmdet.registry import MODELS, TASK_UTILS
-# from mmdet.structures.bbox import BaseBoxes, cat_boxes, get_box_tensor
-# from mmdet.utils import (ConfigType, InstanceList, OptConfigType,
-#                          OptInstanceList, OptMultiConfig)
-# from ..task_modules.prior_generators import (AnchorGenerator,
-#                                              anchor_inside_flags)
-# from ..task_modules.samplers import PseudoSampler
-# from ..utils import images_to_levels, multi_apply, unmap
-# from .base_dense_head import BaseDenseHead
-
-# # Copyright (c) OpenMMLab. All rights reserved.
-# import torch.nn as nn
-# from mmcv.cnn import ConvModule
-
-# from mmdet.registry import MODELS
-# from .anchor_head import AnchorHead
-
-
 import copy
 from typing import List, Optional, Tuple, Union
 
@@ -67,171 +20,16 @@ from mmdet.models.utils import (images_to_levels, multi_apply, unmap,
 from mmdet.models.dense_heads import AnchorHead
 
 
-import os
-import torch.nn.functional as F
-import torch.utils.checkpoint as cp
 from mmcv.cnn import build_norm_layer
-from mmcv.cnn.bricks import DropPath
+from mmdet.utils import OptMultiConfig
+from mmdet.models.backbones.hepv2_transformer import Block
 
-from projects.ViTDet.vitdet.vit import window_partition, window_unpartition, Attention, Mlp
-from mmdet.models.backbones.vheat_models.vHeat import LayerNorm2d, HeatBlock
-from mmdet.models.backbones.vheat_models.vHeatK import HeatKBlock
-from timm.models.layers import trunc_normal_
-
-
-class BCHW2BHWC(nn.Module):
-    def forward(self, x):
-        return x.permute(0, 2, 3, 1)
-
-
-class BHWC2BCHW(nn.Module):
-    def forward(self, x):
-        return x.permute(0, 3, 1, 2)
-
-
-class LayerNorm2d_ex(nn.Module):
-
-    def __init__(
-        self,
-        num_features,
-        eps=1e-6,
-        input_mode='BCHW',
-        output_mode=None,
-    ):
-        super().__init__()
-        self.norm = nn.LayerNorm(num_features, eps=eps)
-        self.input_mode = input_mode
-        self.output_mode = output_mode if (output_mode is not None) else input_mode
-
-    def forward(self, x):
-        if self.input_mode == 'BCHW': x = x.permute(0, 2, 3, 1)
-        x = self.norm(x)
-        if self.output_mode == 'BCHW': x = x.permute(0, 3, 1, 2)
-        return x
-
-
-class F_Interpolate(nn.Module):
-
-    def __init__(
-        self,
-        size=None,
-        mode='nearest',
-    ):
-        super().__init__()
-        self.size = size
-        self.mode = mode
-
-    def forward(self, x):
-        return F.interpolate(x, size=self.size, mode=self.mode)
-
-
-class ConvBlock(nn.Module):
-
-    def __init__(
-        self,
-        in_channels,
-        out_channels,
-        kernel_size,
-        stride=1,
-        padding=0,
-        conv_cfg=None,
-        norm_cfg=None,
-        with_cp=True,
-    ):
-        super().__init__()
-        self.conv = ConvModule(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding,
-            conv_cfg=conv_cfg,
-            norm_cfg=norm_cfg)
-        self.with_cp = with_cp
-
-    def forward(self, x):
-
-        def _inner_forward(x):
-            return self.conv(x)
-
-        if self.with_cp and x.requires_grad:
-            x = cp.checkpoint(_inner_forward, x)
-        else:
-            x = _inner_forward(x)
-
-        return x
-
-
-class AttnBlock(nn.Module):
-
-    def __init__(
-        self,
-        dim,
-        num_heads,
-        mlp_ratio=4.0,
-        qkv_bias=True,
-        drop_path=0.0,
-        norm_cfg=dict(type='LN', eps=1e-6),
-        act_cfg=dict(type='GELU'),
-        use_rel_pos=False,
-        rel_pos_zero_init=True,
-        window_size=0,
-        input_size=None,
-        with_cp=True,
-    ):
-        super().__init__()
-        self.norm1 = build_norm_layer(norm_cfg, dim)[1]
-        self.attn = Attention(
-            dim,
-            num_heads=num_heads,
-            qkv_bias=qkv_bias,
-            use_rel_pos=use_rel_pos,
-            rel_pos_zero_init=rel_pos_zero_init,
-            input_size=input_size if window_size == 0 else
-            (window_size, window_size),
-        )
-
-        self.drop_path = DropPath(
-            drop_path) if drop_path > 0. else nn.Identity()
-        self.norm2 = build_norm_layer(norm_cfg, dim)[1]
-        self.mlp = Mlp(
-            in_features=dim,
-            hidden_features=int(dim * mlp_ratio),
-            act_cfg=act_cfg)
-
-        self.window_size = window_size
-        self.with_cp = with_cp
-
-    def forward(self, x):
-
-        def _inner_forward(x):
-            shortcut = x
-            x = self.norm1(x)
-            # Window partition
-            if self.window_size > 0:
-                H, W = x.shape[1], x.shape[2]
-                x, pad_hw = window_partition(x, self.window_size)
-
-            x = self.attn(x)
-            # Reverse window partition
-            if self.window_size > 0:
-                x = window_unpartition(x, self.window_size, pad_hw, (H, W))
-
-            x = shortcut + self.drop_path(x)
-            x = x + self.drop_path(self.mlp(self.norm2(x)))
-
-            return x
-
-        if self.with_cp and x.requires_grad:
-            x = cp.checkpoint(_inner_forward, x)
-        else:
-            x = _inner_forward(x)
-
-        return x
+from mmengine.logging import MMLogger
+from mmengine.runner.checkpoint import CheckpointLoader
 
 
 @MODELS.register_module()
-class HEPRetinaHead(AnchorHead):
+class HEPv3RetinaHead(AnchorHead):
     r"""An anchor-based head used in `RetinaNet
     <https://arxiv.org/pdf/1708.02002.pdf>`_.
 
@@ -263,24 +61,46 @@ class HEPRetinaHead(AnchorHead):
             scales_per_octave=3,
             ratios=[0.5, 1.0, 2.0],
             strides=[8, 16, 32, 64, 128]),
-        init_cfg=dict(
-            type='Normal',
-            layer='Conv2d',
-            std=0.01,
-            override=dict(
-                type='Normal',
-                name='retina_cls',
-                std=0.01,
-                bias_prob=0.01)),
         # 
-        mmt_min=0.0,
-        mmt_max=1.2,
-        mmt_base=1.0,
-        mmt_mean=0.0,
-        mmt_std=1.0,
-        mmt_encode_mode='base',
+        mmt_in_channels: int = 768,
+        mmt_use_fpn: bool = False,                          # ViC使用局部注意力回归动量
+        mmt_use_gloattn: bool = True,                       # ViC使用全局注意力回归动量
+        mmt_label_use_gloattn: bool = False,                # ViC使用全局注意力回归全局标签
+        # 
+        trans_cfg=dict(
+            embed_dim=384, # 512,
+            depth=8,
+            num_heads=12, # 16,
+            mlp_ratio=4.0,
+            qkv_bias=True,
+            drop_path_rate=0.0,
+            norm_cfg=dict(type='LN', eps=1e-6),
+            act_cfg=dict(type='GELU'),
+            with_cp=False,
+        ),
+        # 
+        phithe_base: Union[float, List[float]] = 45.0,
+        phithe_mean: float = 0.0,
+        phithe_std: float = 1.0,
+        easy_scale: Union[float, List[float]] = 10.0,
+        # 
+        mmt_min: float = 0.0,
+        mmt_max: float = 1.2,
+        mmt_base: float = 1.0,
+        mmt_mean: float = 0.0,
+        mmt_std: float = 1.0,
+        mmt_encode_mode: str = 'base',
+        mmt_reg_channels: int = 1,
+        # 
+        len_seq: int = 640,
+        use_hit_token_for_mmt: bool = False,                # ANT使用hit_token回归动量
+        use_mmt_token: bool = True,                         # ANT使用mmt_token回归动量
+        use_mmt_token_for_label: bool = False,              # ANT使用mmt_token回归全局标签
+        backbone_out_eng: bool = True,
+        backbone_out_phithe: bool = False,
+        # 
+        loss_phithe_reg=dict(type='L1Loss', loss_weight=1.0),
         loss_mmt_reg=dict(type='L1Loss', loss_weight=1.0),
-        mmt_reg_channels=1,
         # 
         # loss_mmt_label=dict(
         #     type='FocalLoss',
@@ -289,29 +109,42 @@ class HEPRetinaHead(AnchorHead):
         #     alpha=0.25,
         #     loss_weight=1.0),
         loss_mmt_label=None,
-        mmt_label_channels=12,
+        mmt_label_channels: int = 12,
         # 
-        mmt_use_fpn=False,     # 使用局部注意力回归动量
-        mmt_use_gloattn=True,  # 使用全局注意力回归动量
-        mmt_in_channels=768,
-        hw_shape=[15, 30],
-        stacked_blocks=2,
-        block_type='HeatKBlock',
-        feat_fusion_mode='cat',
-        drop_path=0.1,
-        mlp_ratio=4.0,
-        post_norm=False,
-        layer_scale=None,
-        # pretrained=None,
-        # pretrained_src=None,
-        with_cp=True,
-        **kwargs):
+        nms_mode: str = 'phithe', # 'bbox',
+        phithe_nms_thr: float = 9.0,
+        score_thr: float = 0.0,
+        max_per_img: int = 1,
+        # 
+        phithe_source: str = 'mix',
+        mmt_source: str = 'mix',
+        # 
+        init_cfg: OptMultiConfig = None,
+        **kwargs,
+    ):
         assert stacked_convs >= 0, \
             '`stacked_convs` must be non-negative integers, ' \
             f'but got {stacked_convs} instead.'
         self.stacked_convs = stacked_convs
         self.conv_cfg = conv_cfg
         self.norm_cfg = norm_cfg
+
+        self.num_classes = num_classes
+
+        self.mmt_in_channels = mmt_in_channels
+        self.mmt_use_fpn = mmt_use_fpn
+        self.mmt_use_gloattn = mmt_use_gloattn
+        self.mmt_label_use_gloattn = mmt_label_use_gloattn
+        self.use_mmt_reg = mmt_use_fpn or mmt_use_gloattn
+
+        self.trans_cfg = trans_cfg
+
+        # self.phithe_pos_thresh = phithe_pos_thresh / 180 * torch.pi
+        self.phithe_base = self.float_to_list(phithe_base, deg_to_rad=True)
+        self.phithe_mean = phithe_mean
+        self.phithe_std = phithe_std
+        self.easy_scale = self.float_to_list(easy_scale, deg_to_rad=False)
+        self.phithe_reg_channels = 2
 
         self.mmt_min = mmt_min
         self.mmt_max = mmt_max
@@ -320,27 +153,28 @@ class HEPRetinaHead(AnchorHead):
         self.mmt_std = mmt_std
         self.mmt_encode_mode = mmt_encode_mode
         self.use_sigmoid_mmt = loss_mmt_reg.get('use_sigmoid', False)
-        self.use_mmt_reg = (loss_mmt_reg is not None)
         self.mmt_reg_channels = mmt_reg_channels
 
-        self.use_mmt_label = (loss_mmt_label is not None)
+        self.len_seq = len_seq
+        self.use_hit_token_for_mmt = use_hit_token_for_mmt
+        self.use_mmt_token = use_mmt_token
+        self.use_mmt_token_for_label = use_mmt_token_for_label
+        self.backbone_out_eng = backbone_out_eng
+        self.backbone_out_phithe = backbone_out_phithe
+
+        self.use_mmt_label = (mmt_label_use_gloattn or use_mmt_token_for_label)
         self.mmt_label_channels = mmt_label_channels
 
-        self.mmt_use_fpn = mmt_use_fpn
-        self.mmt_use_gloattn = mmt_use_gloattn
-        self.mmt_in_channels = mmt_in_channels
-        self.hw_shape = hw_shape
-        self.stacked_blocks = stacked_blocks
-        self.block_type = block_type if isinstance(block_type, str) else ''
-        self.feat_fusion_mode = feat_fusion_mode
-        self.mlp_ratio = mlp_ratio
-        self.drop_path = drop_path
-        self.post_norm = post_norm
-        self.layer_scale = layer_scale
-        # self.pretrained = pretrained
-        # self.pretrained_src = pretrained_src
-        self.with_cp = with_cp
+        self.nms_mode = nms_mode
+        self.phithe_nms_thr = phithe_nms_thr / 180 * torch.pi
+        self.score_thr = score_thr
+        self.max_per_img = max_per_img
 
+        self.phithe_source = phithe_source
+        self.mmt_source = mmt_source
+
+        self.width = 960
+        self.height = 480
         self.eps = 1e-6
 
         super().__init__(
@@ -350,58 +184,28 @@ class HEPRetinaHead(AnchorHead):
             init_cfg=init_cfg,
             **kwargs)
 
-        if self.use_mmt_reg:                                                                        # mmt
-            self.loss_mmt_reg = MODELS.build(loss_mmt_reg)
-        if self.use_mmt_label:                                                                      # mmt_label
+        self.loss_phithe_reg = MODELS.build(loss_phithe_reg)
+        self.loss_mmt_reg = MODELS.build(loss_mmt_reg)
+
+        if self.use_mmt_label:
             self.loss_mmt_label = MODELS.build(loss_mmt_label)
 
-    # def load_pretrained(self, ckpt=""):
-    #     _ckpt = torch.load(open(ckpt, "rb"), map_location=torch.device("cpu"))
-    #     print(f"Successfully load ckpt {ckpt}")
+        self.fp16_enabled = False
 
-    #     if self.pretrained_src == 'simmim':
-    #         freq_embed_name = 'neck.freq_embed'
-    #         weight_name_prefix = 'neck.blocks.'
-    #         len_prefix = len(weight_name_prefix)
-
-    #         pretrained_freq_embed = _ckpt['model'][freq_embed_name]
-    #         if pretrained_freq_embed.shape[:2] != self.freq_embed.shape[:2]:
-    #             resized_freq_embed = pretrained_freq_embed.permute(2, 0, 1).contiguous().unsqueeze(0)
-    #             resized_freq_embed = F.interpolate(
-    #                 resized_freq_embed, size=(self.freq_embed.shape[0], self.freq_embed.shape[1]), mode='bicubic'
-    #             ).squeeze().permute(1, 2, 0).contiguous()
-    #         else:
-    #             resized_freq_embed = pretrained_freq_embed
-    #         print('freq_embed: {} -> {}'.format(pretrained_freq_embed.shape, resized_freq_embed.shape))
-
-    #         self.freq_embed.data.copy_(resized_freq_embed.to(self.freq_embed.device))
-    #         print('self.freq_embed: device: {}, requires_grad: {}'.format(self.freq_embed.device, self.freq_embed.requires_grad))
-
-    #         new_weights = {}
-    #         weights_keys = list(_ckpt['model'].keys())
-    #         for k in range(self.stacked_blocks):
-    #             for weight_name in weights_keys:
-    #                 if weight_name[:len_prefix] == weight_name_prefix:
-    #                     new_weights[weight_name[len_prefix:]] = _ckpt['model'][weight_name]
-    #                     print('{} -> {}'.format(weight_name, weight_name[len_prefix:]))
-
-    #     elif self.pretrained_src == 'backbone':
-    #         weight_name_prefix = 'layers.3.1'
-    #         len_prefix = len(weight_name_prefix)
-
-    #         new_weights = {}
-    #         weights_keys = list(_ckpt['model'].keys())
-    #         for k in range(self.stacked_blocks):
-    #             for weight_name in weights_keys:
-    #                 if weight_name[:len_prefix] == weight_name_prefix:
-    #                     new_weights[str(k) + weight_name[len_prefix:]] = _ckpt['model'][weight_name]
-    #                     print('{} -> {}'.format(weight_name, str(k) + weight_name[len_prefix:]))
-
-    #     else:
-    #         new_weights = {}
-
-    #     incompatibleKeys = self.mmt_reg_blocks.load_state_dict(new_weights, strict=False)
-    #     print(incompatibleKeys)
+    def float_to_list(self, x, deg_to_rad=False):
+        if isinstance(x, float) or isinstance(x, int):
+            if deg_to_rad:
+                return [x / 180 * torch.pi] * self.num_classes
+            else:
+                return [x] * self.num_classes
+        elif isinstance(x, list) or isinstance(x, tuple):
+            assert len(x) == self.num_classes
+            if deg_to_rad:
+                return [temp / 180 * torch.pi for temp in x]
+            else:
+                return x
+        else:
+            raise NotImplementedError
 
     def _init_weights(self, m):
         if isinstance(m, nn.Conv2d):
@@ -415,6 +219,29 @@ class HEPRetinaHead(AnchorHead):
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
+
+    def init_weights(self):
+        logger = MMLogger.get_current_instance()
+        if self.init_cfg is None:
+            logger.warn(f'No pre-trained weights for '
+                        f'{self.__class__.__name__}, '
+                        f'training start from scratch')
+            self.apply(self._init_weights)
+        else:
+            assert 'checkpoint' in self.init_cfg, f'Only support ' \
+                                                  f'specify `Pretrained` in ' \
+                                                  f'`init_cfg` in ' \
+                                                  f'{self.__class__.__name__} '
+            ckpt = CheckpointLoader.load_checkpoint(
+                self.init_cfg.checkpoint, logger=logger, map_location='cpu')
+            if 'model' in ckpt:
+                _state_dict = ckpt['model']
+            elif 'state_dict' in ckpt:
+                _state_dict = ckpt['state_dict']
+            else:
+                _state_dict = ckpt
+            incompatibleKeys = self.load_state_dict(_state_dict, False)
+            print(incompatibleKeys)
 
     def _init_layers(self):
         """Initialize layers of the head."""
@@ -446,8 +273,7 @@ class HEPRetinaHead(AnchorHead):
         self.retina_reg = nn.Conv2d(
             in_channels, self.num_base_priors * self.bbox_coder.encode_size, 3, padding=1)
 
-        # self.mmt_use_fpn只负责self.use_mmt_reg
-        if self.use_mmt_reg and self.mmt_use_fpn:
+        if self.mmt_use_fpn:
             self.mmt_reg_convs = nn.ModuleList()
 
             for j in range(self.stacked_convs):
@@ -464,107 +290,60 @@ class HEPRetinaHead(AnchorHead):
             self.retina_mmt_reg = nn.Conv2d(
                 in_channels, self.num_base_priors * self.mmt_reg_channels, 3, padding=1)
 
-        # self.mmt_use_gloattn负责(self.use_mmt_reg or self.use_mmt_label)
-        if (self.use_mmt_reg or self.use_mmt_label) and self.mmt_use_gloattn:
-            self.mmt_reg_blocks = nn.ModuleList()
-            mmt_in_channels = self.mmt_in_channels
+        embed_dim = self.trans_cfg['embed_dim']
+        depth = self.trans_cfg['depth']
+        num_heads = self.trans_cfg['num_heads']
+        mlp_ratio = self.trans_cfg['mlp_ratio']
+        qkv_bias = self.trans_cfg['qkv_bias']
+        drop_path_rate = self.trans_cfg['drop_path_rate']
+        norm_cfg = self.trans_cfg['norm_cfg']
+        act_cfg = self.trans_cfg['act_cfg']
+        with_cp = self.trans_cfg['with_cp']
 
-            if self.stacked_blocks == 0:
-                self.mmt_reg_blocks.append(nn.Identity())
+        in_channels = self.mmt_in_channels
+        self.decoder_embed = nn.Linear(in_channels, embed_dim, bias=True)
 
-            elif self.block_type == 'ConvBlock':
-                for k in range(self.stacked_blocks):
-                    self.mmt_reg_blocks.append(
-                        ConvBlock(
-                            mmt_in_channels,
-                            mmt_in_channels,
-                            3,
-                            stride=1,
-                            padding=1,
-                            conv_cfg=self.conv_cfg,
-                            norm_cfg=self.norm_cfg,
-                            with_cp=self.with_cp))
+        if self.mmt_use_gloattn or self.mmt_label_use_gloattn:
+            self.vic_embed = nn.Linear(in_channels, embed_dim, bias=True)
 
-            elif self.block_type == 'AttnBlock':
-                self.mmt_reg_blocks.append(BCHW2BHWC())     # FPN gives BCHW but AttnBlock uses BHWC
+        if self.backbone_out_eng:
+            self.decoder_embed_eng = nn.Linear(in_channels, embed_dim, bias=True)
+        if self.backbone_out_phithe:
+            self.decoder_embed_phithe = nn.Linear(in_channels, embed_dim, bias=True)
 
-                for k in range(self.stacked_blocks):
-                    self.mmt_reg_blocks.append(
-                        AttnBlock(
-                            dim=mmt_in_channels,
-                            num_heads=mmt_in_channels // 32,
-                            mlp_ratio=self.mlp_ratio,
-                            drop_path=self.drop_path,
-                            with_cp=self.with_cp,
-                        ))
+        dpr = [drop_path_rate] * depth  # [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
 
-                self.mmt_reg_blocks.append(LayerNorm2d_ex(
-                    num_features=mmt_in_channels, eps=1e-6, input_mode='BHWC', output_mode='BCHW'))
+        self.decoder_blocks = nn.ModuleList([
+            Block(
+                dim=embed_dim,
+                num_heads=num_heads,
+                mlp_ratio=mlp_ratio,
+                qkv_bias=qkv_bias,
+                drop_path=dpr[i],
+                norm_cfg=norm_cfg,
+                act_cfg=act_cfg,
+                with_cp=with_cp,
+            ) for i in range(depth)
+        ])
 
-            elif self.block_type == 'HeatBlock':
-                for k in range(self.stacked_blocks):
-                    self.mmt_reg_blocks.append(
-                        HeatBlock(
-                            res=self.hw_shape[1],
-                            hidden_dim=mmt_in_channels,
-                            drop_path=self.drop_path,
-                            norm_layer=LayerNorm2d,
-                            use_checkpoint=self.with_cp,
-                            mlp_ratio=self.mlp_ratio,
-                            post_norm=self.post_norm,
-                            layer_scale=self.layer_scale,
-                            infer_mode=False,
-                        ))
-                self.mmt_reg_blocks.append(LayerNorm2d_ex(
-                    num_features=mmt_in_channels, eps=1e-6, input_mode='BCHW', output_mode='BCHW'))
+        self.decoder_norm = build_norm_layer(norm_cfg, embed_dim)[1]
 
-            elif self.block_type == 'HeatKBlock':
-                for k in range(self.stacked_blocks):
-                    self.mmt_reg_blocks.append(
-                        HeatKBlock(
-                            res=self.hw_shape[1],
-                            hidden_dim=mmt_in_channels,
-                            drop_path=self.drop_path,
-                            norm_layer=LayerNorm2d,
-                            use_checkpoint=self.with_cp,
-                            mlp_ratio=self.mlp_ratio,
-                            post_norm=self.post_norm,
-                            layer_scale=self.layer_scale,
-                            infer_mode=False,
-                            feat_fusion_mode=self.feat_fusion_mode,
-                        ))
-                self.mmt_reg_blocks.append(LayerNorm2d_ex(
-                    num_features=mmt_in_channels, eps=1e-6, input_mode='BCHW', output_mode='BCHW'))
+        self.dense_cls        = nn.Linear(embed_dim, self.cls_out_channels)
+        self.dense_phithe_reg = nn.Linear(embed_dim, self.phithe_reg_channels)
 
-            else:
-                self.mmt_reg_blocks.append(nn.Identity())
+        if self.use_hit_token_for_mmt:
+            self.dense_hit_mmt_reg = nn.Linear(embed_dim, self.mmt_reg_channels)
+        if self.use_mmt_token:
+            self.dense_mmt_reg = nn.Linear(embed_dim, self.mmt_reg_channels)
+        if self.use_mmt_token_for_label:
+            self.dense_mmt_label = nn.Linear(embed_dim, self.mmt_label_channels)
 
-            if 'Heat' in self.block_type and self.stacked_blocks > 0:
-                self.freq_embed = nn.Parameter(
-                    torch.zeros(self.hw_shape[0], self.hw_shape[1], mmt_in_channels),
-                    requires_grad=True)
-                trunc_normal_(self.freq_embed, std=.02)
-            else:
-                self.freq_embed = None
+        if self.mmt_use_gloattn:
+            self.mmt_reg_fc = nn.Linear(embed_dim, self.mmt_reg_channels)
+        if self.mmt_label_use_gloattn:
+            self.mmt_label_fc = nn.Linear(embed_dim, self.mmt_label_channels)
 
-            if self.use_mmt_reg:
-                self.mmt_reg_fc = nn.Sequential(
-                    nn.AdaptiveAvgPool2d(1),
-                    nn.Flatten(1),
-                    nn.Linear(mmt_in_channels, self.mmt_reg_channels),
-                )
-            if self.use_mmt_label:
-                self.mmt_label_fc = nn.Sequential(
-                    nn.AdaptiveAvgPool2d(1),
-                    nn.Flatten(1),
-                    nn.Linear(mmt_in_channels, self.mmt_label_channels),
-                )
-
-            self.apply(self._init_weights)
-
-            # if 'Heat' in self.block_type and self.stacked_blocks > 0 and self.pretrained is not None:
-            #     assert os.path.exists(self.pretrained)
-            #     self.load_pretrained(self.pretrained)
+        self.apply(self._init_weights)
 
     def forward_single(self, x):
         """Forward feature of a single scale level.
@@ -581,7 +360,7 @@ class HEPRetinaHead(AnchorHead):
         """
         cls_feat = x
         reg_feat = x
-        if self.use_mmt_reg and self.mmt_use_fpn: mmt_reg_feat = x                                  # mmt
+        if self.mmt_use_fpn: mmt_reg_feat = x                                  # mmt
 
         for cls_conv in self.cls_convs:
             cls_feat = cls_conv(cls_feat)
@@ -590,7 +369,7 @@ class HEPRetinaHead(AnchorHead):
         cls_score = self.retina_cls(cls_feat)
         bbox_pred = self.retina_reg(reg_feat)
 
-        if self.use_mmt_reg and self.mmt_use_fpn:                                                   # mmt
+        if self.mmt_use_fpn:                                                   # mmt
             for mmt_reg_conv in self.mmt_reg_convs:
                 mmt_reg_feat = mmt_reg_conv(mmt_reg_feat)
             mmt_reg_pred = self.retina_mmt_reg(mmt_reg_feat)
@@ -600,75 +379,150 @@ class HEPRetinaHead(AnchorHead):
         return cls_score, bbox_pred, mmt_reg_pred                                                   # mmt
 
     def forward(self, x):
-        fpn_feats, backbone_feat = x
+        backbone_outs, backbone_outs_others, fpn_feats, backbone_feat = x
+
+        feat = backbone_outs[-1]
+        # assert feat.requires_grad
+        feat = self.decoder_embed(feat)
+
+        feat_main = feat[:, :-1, :]
+        feat_mmt = feat[:, -1:, :]
+
+        backbone_x = backbone_outs_others['x']
+        # assert not backbone_x.requires_grad
+
+        flags = backbone_x[..., 0:1]
+        # x_eng = backbone_x[..., 1]
+        # x_phi = backbone_x[..., 2]
+        # x_the = backbone_x[..., 3]
+        # x_time = backbone_x[..., 4]
+        flags_0 = backbone_x[..., 0]
+
+        B, N, C = feat_main.shape
+
+        if self.backbone_out_eng:
+            y_eng = backbone_outs_others['y_eng']
+            # assert y_eng.requires_grad
+            y_eng = self.decoder_embed_eng(y_eng)
+        else:
+            y_eng = 0.0
+
+        if self.backbone_out_phithe:
+            y_phithe = backbone_outs_others['y_phithe']
+            # assert y_phithe.requires_grad
+            y_phithe = self.decoder_embed_phithe(y_phithe)
+        else:
+            y_phithe = 0.0
+
+        x = feat_main + y_eng + y_phithe
+
+        flags = (flags % self.len_seq + self.eps).to(dtype=torch.long)          # 浮点数改整数以防出错
+        attn_mask_main = (flags != flags.transpose(-2, -1)) * (-1e9)            # B, N, N
+        attn_mask_mmt = (torch.abs(flags_0) < self.eps) * (-1e9)                # B, N
+
+        if self.mmt_use_gloattn or self.mmt_label_use_gloattn:
+            feat_vic = backbone_feat.flatten(2).transpose(-2, -1)
+            feat_vic = self.vic_embed(feat_vic)
+            B, HW, C = feat_vic.shape
+
+            x = torch.cat([x, feat_mmt, feat_vic], dim=1)                       # B, N + 1 + HW, C
+            attn_mask = torch.zeros(B, N + 1 + HW, N + 1 + HW, device=x.device, requires_grad=False)
+        else:
+            x = torch.cat([x, feat_mmt], dim=1)                                 # B, N + 1, C
+            attn_mask = torch.zeros(B, N + 1, N + 1, device=x.device, requires_grad=False)
+
+        attn_mask[:, :N, :N] = attn_mask_main
+        attn_mask[:,  N, :N] = attn_mask_mmt
+        attn_mask[:, :N,  N] = attn_mask_mmt
+        attn_mask[:, N:, N:] = 1
+
+        for i, blk in enumerate(self.decoder_blocks):
+            x = blk(x, attn_mask)
+
+        feat_x = self.decoder_norm(x)
+
+        # ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #
+
+        feat_x_main = feat_x[:, :N, :]
+        feat_x_mmt = feat_x[:, N:N+1, :]
+        if self.mmt_use_gloattn or self.mmt_label_use_gloattn:
+            mmt_reg_feat = feat_x[:, N+1:, :].mean(dim=1)
+
+        cls_scores_ant = []
+        phithe_reg_preds_ant = []
+        mmt_reg_preds_ant = []
+        mmt_label_scores_ant = []
+
+        cls_score = self.dense_cls(feat_x_main)
+        phithe_reg_pred = self.dense_phithe_reg(feat_x_main)
+
+        if self.use_mmt_token:
+            mmt_reg_pred = self.dense_mmt_reg(feat_x_mmt).repeat(1, N, 1)
+        if self.use_hit_token_for_mmt:
+            hit_mmt_reg_pred = self.dense_hit_mmt_reg(feat_x_main)
+            if self.use_mmt_token:
+                # max_values, max_indices = torch.max(cls_score, dim=-1, keepdim=False)
+                # replace_mask = (max_indices > 0)
+                # mmt_reg_pred[replace_mask] = hit_mmt_reg_pred[replace_mask]
+                max_values, max_indices = torch.max(cls_score, dim=-1, keepdim=True)
+                replace_mask = (max_indices > 0)
+                mmt_reg_pred = mmt_reg_pred * (~replace_mask) + hit_mmt_reg_pred * replace_mask
+            else:
+                mmt_reg_pred = hit_mmt_reg_pred
+        if self.use_mmt_token_for_label:
+            mmt_label_score = self.dense_mmt_label(feat_x_mmt).repeat(1, N, 1)
+        else:
+            mmt_label_score = None
+
+        cls_scores_ant.append(cls_score)
+        phithe_reg_preds_ant.append(phithe_reg_pred)
+        mmt_reg_preds_ant.append(mmt_reg_pred)
+        mmt_label_scores_ant.append(mmt_label_score)
+
+        # ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #
 
         cls_scores, bbox_preds, mmt_reg_preds_use_fpn = multi_apply(self.forward_single, fpn_feats)
 
-        # self.mmt_use_gloattn负责(self.use_mmt_reg or self.use_mmt_label)
-        if (self.use_mmt_reg or self.use_mmt_label) and self.mmt_use_gloattn:
-            mmt_reg_feat = backbone_feat
-
-            # # 调整self.freq_embed的大小（可忽略）
-            # if self.freq_embed is None:
-            #     resized_freq_embed = self.freq_embed
-            # elif self.freq_embed.shape[:2] != mmt_reg_feat.shape[2:]:
-            #     resized_freq_embed = self.freq_embed.permute(2, 0, 1).contiguous().unsqueeze(0)
-            #     resized_freq_embed = F.interpolate(
-            #         resized_freq_embed, size=(mmt_reg_feat.shape[2], mmt_reg_feat.shape[3]), mode='bicubic'
-            #     ).squeeze().permute(1, 2, 0).contiguous()
-            # else:
-            #     resized_freq_embed = self.freq_embed
-
-            # 回归单个mmt
-            for block in self.mmt_reg_blocks:
-                if 'Heat' in block.__class__.__name__:
-                    mmt_reg_feat = block(mmt_reg_feat, self.freq_embed)
-                else:
-                    mmt_reg_feat = block(mmt_reg_feat)
-
+        if self.mmt_use_gloattn:
             # 在维度上展开回归的mmt使其与featmap等大
-            if self.use_mmt_reg:
-                mmt_reg_preds_use_gloattn = self.mmt_reg_fc(mmt_reg_feat)
-                mmt_reg_preds = []
-                num_levels = len(cls_scores)
-                for level in range(num_levels):
-                    cls_score = cls_scores[level]
-                    B, C, H, W = cls_score.shape
-                    temp = mmt_reg_preds_use_gloattn[:, None, :, None, None].repeat(
-                        1, self.num_base_priors, 1, H, W).flatten(1, 2)
+            mmt_reg_preds_use_gloattn = self.mmt_reg_fc(mmt_reg_feat)
+            mmt_reg_preds = []
+            num_levels = len(cls_scores)
+            for level in range(num_levels):
+                cls_score = cls_scores[level]
+                B, C, H, W = cls_score.shape
+                temp = mmt_reg_preds_use_gloattn[:, None, :, None, None].repeat(
+                    1, self.num_base_priors, 1, H, W).flatten(1, 2)
 
-                    if mmt_reg_preds_use_fpn[level] is not None:
-                        # OLD: 如果FPN也回归了mmt，那么将两者相加
-                        # temp += mmt_reg_preds_use_fpn[level]
+                if mmt_reg_preds_use_fpn[level] is not None:
+                    # 如果FPN也回归了mmt，那么将cls_score最大值索引不等于0的那些mmt
+                    #     替换为mmt_reg_preds_use_fpn[level]。适用于多目标检测
+                    cls_score = cls_score.reshape(B, self.num_base_priors, self.cls_out_channels, H, W)
+                    max_values, max_indices = cls_score.max(dim=2, keepdim=False)
+                    replace_mask = (max_indices > 0)
+                    # temp[replace_mask] = mmt_reg_preds_use_fpn[level][replace_mask]
+                    temp = temp * (~replace_mask) + mmt_reg_preds_use_fpn[level] * replace_mask
 
-                        # NEW: 如果FPN也回归了mmt，那么将cls_score最大值索引不等于0的那些mmt
-                        #     替换为mmt_reg_preds_use_fpn[level]。适用于多目标检测
-                        cls_score = cls_score.reshape(B, self.num_base_priors, self.cls_out_channels, H, W)
-                        max_values, max_indices = cls_score.max(dim=2, keepdim=False)
-                        replace_mask = (max_indices > 0)
-                        temp[replace_mask] = mmt_reg_preds_use_fpn[level][replace_mask]
-
-                    mmt_reg_preds.append(temp)
-            else:
-                mmt_reg_preds = mmt_reg_preds_use_fpn
-
-            if self.use_mmt_label:
-                mmt_label_scores_use_gloattn = self.mmt_label_fc(mmt_reg_feat)
-                mmt_label_scores = []
-                num_levels = len(cls_scores)
-                for level in range(num_levels):
-                    cls_score = cls_scores[level]
-                    B, C, H, W = cls_score.shape
-                    temp = mmt_label_scores_use_gloattn[:, None, :, None, None].repeat(
-                        1, self.num_base_priors, 1, H, W).flatten(1, 2)
-                    mmt_label_scores.append(temp)
-            else:
-                mmt_label_scores = [None, ] * len(cls_scores)
+                mmt_reg_preds.append(temp)
         else:
             mmt_reg_preds = mmt_reg_preds_use_fpn
+
+        if self.mmt_label_use_gloattn:
+            mmt_label_scores_use_gloattn = self.mmt_label_fc(mmt_reg_feat)
+            mmt_label_scores = []
+            num_levels = len(cls_scores)
+            for level in range(num_levels):
+                cls_score = cls_scores[level]
+                B, C, H, W = cls_score.shape
+                temp = mmt_label_scores_use_gloattn[:, None, :, None, None].repeat(
+                    1, self.num_base_priors, 1, H, W).flatten(1, 2)
+                mmt_label_scores.append(temp)
+        else:
             mmt_label_scores = [None, ] * len(cls_scores)
 
-        return cls_scores, bbox_preds, mmt_reg_preds, mmt_label_scores
+        return (cls_scores, bbox_preds, mmt_reg_preds, mmt_label_scores,
+                cls_scores_ant, phithe_reg_preds_ant, mmt_reg_preds_ant, mmt_label_scores_ant)
+
 
     def mmt_encode_sigmoid(self, mmt_gts) -> torch.Tensor:
         mmt_norm = torch.clamp((mmt_gts - self.mmt_min) / (self.mmt_max - self.mmt_min),
@@ -730,7 +584,7 @@ class HEPRetinaHead(AnchorHead):
     #                       min =          +self.eps, max = torch.pi-self.eps)
     #     return torch.cat([phi, the], dim=1)
 
-    def phithe_to_bbox(self, decoded_phithe_preds) -> torch.Tensor:
+    def phithe_to_bbox(self, decoded_phithe_preds, label_anchors) -> torch.Tensor:
         local_device = decoded_phithe_preds.device
 
         w_px = torch.tensor([
@@ -791,8 +645,10 @@ class HEPRetinaHead(AnchorHead):
         x_ctr_2D = (decoded_phithe_preds[:, 0::2] / (2 * torch.pi) + 0.5) % 1.0 * self.width
         y_ctr_2D = (decoded_phithe_preds[:, 1::2] /      torch.pi       ) % 1.0 * self.height
         ind = torch.sum((y_ctr_2D - hh_px_2D) >= 0, dim=1)
-        w_cell_2D = w_px[ind].unsqueeze(-1) * self.easy_scale
-        h_cell_2D = h_px[ind].unsqueeze(-1) * self.easy_scale
+
+        easy_scale = torch.tensor(self.easy_scale, device=local_device)[label_anchors]
+        w_cell_2D = (w_px[ind] * easy_scale).unsqueeze(-1)
+        h_cell_2D = (h_px[ind] * easy_scale).unsqueeze(-1)
 
         x_min = x_ctr_2D - w_cell_2D / 2
         y_min = y_ctr_2D - h_cell_2D / 2
@@ -804,7 +660,7 @@ class HEPRetinaHead(AnchorHead):
     # ##### ##### ##### ##### ##### #####   from anchor_head.py   ##### ##### ##### ##### ##### ##### #
 
 
-    def get_anchors(
+    def get_anchors_ant(
         self,
         batch_img_metas: List[dict],
         device,
@@ -827,7 +683,7 @@ class HEPRetinaHead(AnchorHead):
                 anchors_phi.to(device=device),
                 anchors_the.to(device=device))
 
-    def get_targets(
+    def get_targets_ant(
         self,
         anchors_flag,
         anchors_phi,
@@ -847,7 +703,7 @@ class HEPRetinaHead(AnchorHead):
         mmt_reg_targets = torch.zeros([B, N, self.mmt_reg_channels], device=device)
         mmt_reg_weights = torch.zeros([B, N, self.mmt_reg_channels], device=device)
 
-        if self.use_mmt_label:
+        if self.use_mmt_token_for_label:
             mmt_labels = torch.zeros([B, N], dtype=torch.long, device=device) + self.mmt_label_channels
             mmt_label_weights = torch.ones([B, N], device=device)
             mmt_label_avg_factor = torch.sum(mmt_label_weights)
@@ -948,7 +804,7 @@ class HEPRetinaHead(AnchorHead):
             mmt_reg_targets[i] = encoded_mmt
             mmt_reg_weights[i, pos_anchors] = 1.0
 
-            if self.use_mmt_label:
+            if self.use_mmt_token_for_label:
                 mmt_labels[i] = gt_instances['mmt_labels'][0]
 
         avg_factors = [
@@ -962,6 +818,66 @@ class HEPRetinaHead(AnchorHead):
                 mmt_reg_targets, mmt_reg_weights,
                 mmt_labels, mmt_label_weights,
                 avg_factors)
+
+    def loss_by_feat_ant(
+            self,
+            cls_scores: List[Tensor],
+            phithe_reg_preds: List[Tensor],
+            mmt_reg_preds: List[Tensor],
+            mmt_label_scores: List[Optional[Tensor]],
+            batch_gt_instances: InstanceList,
+            batch_img_metas: List[dict],
+            batch_gt_instances_ignore: OptInstanceList = None):
+
+        device = cls_scores[0].device
+
+        anchors_flag, anchors_phi, anchors_the = self.get_anchors_ant(
+            batch_img_metas, device=device)
+        cls_reg_targets = self.get_targets_ant(
+            anchors_flag,
+            anchors_phi,
+            anchors_the,
+            batch_gt_instances,
+            device=device)
+        (labels, label_weights, phithe_reg_targets, phithe_reg_weights,
+         mmt_reg_targets, mmt_reg_weights,
+         mmt_labels, mmt_label_weights,
+         avg_factors) = cls_reg_targets
+
+        # classification loss
+        labels = labels.reshape(-1)
+        label_weights = label_weights.reshape(-1)
+        cls_score = cls_scores[-1].reshape(-1, self.cls_out_channels)
+        losses_cls = self.loss_cls(
+            cls_score, labels, label_weights, avg_factor=int(avg_factors[0]))
+
+        # regression loss
+        phithe_reg_targets = phithe_reg_targets.reshape(-1, self.phithe_reg_channels)
+        phithe_reg_weights = phithe_reg_weights.reshape(-1, self.phithe_reg_channels)
+        phithe_reg_pred = phithe_reg_preds[-1].reshape(-1, self.phithe_reg_channels)
+        losses_phithe_reg = self.loss_phithe_reg(
+            phithe_reg_pred, phithe_reg_targets, phithe_reg_weights, avg_factor=int(avg_factors[1]))
+
+        # mmt loss
+        # 如果对gt进行了sigmoid预编码、但后续使用L1Loss/L2Loss等而非使用BCELoss，必须也对mmt_reg_pred预编码！
+        if self.mmt_encode_mode == 'sigmoid' and not self.use_sigmoid_mmt:
+            mmt_reg_pred = torch.sigmoid(mmt_reg_pred)
+        mmt_reg_targets = mmt_reg_targets.reshape(-1, self.mmt_reg_channels)
+        mmt_reg_weights = mmt_reg_weights.reshape(-1, self.mmt_reg_channels)
+        mmt_reg_pred = mmt_reg_preds[-1].reshape(-1, self.mmt_reg_channels)
+        losses_mmt_reg = self.loss_mmt_reg(
+            mmt_reg_pred, mmt_reg_targets, mmt_reg_weights, avg_factor=int(avg_factors[2]))
+
+        if self.use_mmt_token_for_label:
+            mmt_labels = mmt_labels.reshape(-1)
+            mmt_label_weights = mmt_label_weights.reshape(-1)
+            mmt_label_score = mmt_label_scores[-1].reshape(-1, self.mmt_label_channels)
+            losses_mmt_label = self.loss_mmt_label(
+                mmt_label_score, mmt_labels, mmt_label_weights, avg_factor=int(avg_factors[3]))
+        else:
+            losses_mmt_label = torch.zeros(1, device=losses_cls.device)
+
+        return (losses_cls, losses_phithe_reg, losses_mmt_reg, losses_mmt_label)
 
 
     # ##### ##### ##### ##### ##### #####   from anchor_head.py   ##### ##### ##### ##### ##### ##### #
@@ -1044,7 +960,7 @@ class HEPRetinaHead(AnchorHead):
                                   dtype=torch.long)
         label_weights = anchors.new_zeros(num_valid_anchors, dtype=torch.float)
 
-        if self.use_mmt_label:                                                                      # mmt_label
+        if self.mmt_label_use_gloattn:
             mmt_labels = anchors.new_full((num_valid_anchors, ),
                                           self.mmt_label_channels,
                                           dtype=torch.long)
@@ -1087,7 +1003,7 @@ class HEPRetinaHead(AnchorHead):
             else:
                 label_weights[pos_inds] = self.train_cfg['pos_weight']
 
-            if self.use_mmt_label:                                                                  # mmt_label
+            if self.mmt_label_use_gloattn:
                 mmt_labels[pos_inds] = sampling_result.pos_gt_mmt_labels
                 if self.train_cfg['pos_weight'] <= 0:
                     mmt_label_weights[pos_inds] = 1.0
@@ -1111,7 +1027,7 @@ class HEPRetinaHead(AnchorHead):
             if self.use_mmt_reg:                                                                    # mmt
                 mmt_reg_targets = unmap(mmt_reg_targets, num_total_anchors, inside_flags)
                 mmt_reg_weights = unmap(mmt_reg_weights, num_total_anchors, inside_flags)
-            if self.use_mmt_label:                                                                  # mmt_label
+            if self.mmt_label_use_gloattn:
                 mmt_labels = unmap(
                     mmt_labels, num_total_anchors, inside_flags,
                     fill=self.mmt_label_channels)  # fill bg label
@@ -1233,7 +1149,7 @@ class HEPRetinaHead(AnchorHead):
             mmt_reg_targets_list = [None, ] * len(bbox_targets_list)
             mmt_reg_weights_list = [None, ] * len(bbox_weights_list)
 
-        if self.use_mmt_label:                                                                      # mmt_label
+        if self.mmt_label_use_gloattn:
             mmt_labels_list         = images_to_levels(all_mmt_labels,
                                                        num_level_anchors)
             mmt_label_weights_list  = images_to_levels(all_mmt_label_weights,
@@ -1321,7 +1237,7 @@ class HEPRetinaHead(AnchorHead):
         else:
             loss_mmt_reg = torch.zeros(1, device=loss_bbox.device)
 
-        if self.use_mmt_label:                                                                      # mmt_label
+        if self.mmt_label_use_gloattn:
             mmt_labels = mmt_labels.reshape(-1)
             mmt_label_weights = mmt_label_weights.reshape(-1)
             mmt_label_score = mmt_label_score.permute(0, 2, 3, 1).reshape(-1, self.mmt_label_channels)
@@ -1338,6 +1254,10 @@ class HEPRetinaHead(AnchorHead):
             bbox_preds: List[Tensor],
             mmt_reg_preds: List[Optional[Tensor]],                                                  # mmt
             mmt_label_scores: List[Optional[Tensor]],                                               # mmt_label
+            cls_scores_ant: List[Tensor],
+            phithe_reg_preds_ant: List[Tensor],
+            mmt_reg_preds_ant: List[Tensor],
+            mmt_label_scores_ant: List[Optional[Tensor]],
             batch_gt_instances: InstanceList,
             batch_img_metas: List[dict],
             batch_gt_instances_ignore: OptInstanceList = None) -> dict:
@@ -1389,7 +1309,7 @@ class HEPRetinaHead(AnchorHead):
         all_anchor_list = images_to_levels(concat_anchor_list,
                                            num_level_anchors)
 
-        losses_cls, losses_bbox, losses_mmt_reg, losses_mmt_label = multi_apply(
+        losses_cls_vic, losses_bbox_vic, losses_mmt_reg_vic, losses_mmt_label_vic = multi_apply(
             self.loss_by_feat_single,
             cls_scores,
             bbox_preds,
@@ -1403,25 +1323,46 @@ class HEPRetinaHead(AnchorHead):
             mmt_reg_targets_list, mmt_reg_weights_list,                                             # mmt
             mmt_labels_list, mmt_label_weights_list,                                                # mmt_label
             avg_factor=avg_factor)
-        return dict(loss_cls=losses_cls, loss_bbox=losses_bbox, 
-                    loss_mmt_reg=losses_mmt_reg,                                                    # mmt
-                    loss_mmt_label=losses_mmt_label,                                                # mmt_label
-                    )
+
+        losses_cls_ant, losses_phithe_reg_ant, losses_mmt_reg_ant, losses_mmt_label_ant = self.loss_by_feat_ant(
+            cls_scores_ant,
+            phithe_reg_preds_ant,
+            mmt_reg_preds_ant,
+            mmt_label_scores_ant,
+            batch_gt_instances,
+            batch_img_metas,
+            batch_gt_instances_ignore)
+
+        return dict(
+            loss_cls_vic=losses_cls_vic,
+            loss_bbox_vic=losses_bbox_vic,
+            loss_mmt_reg_vic=losses_mmt_reg_vic,                                                    # mmt
+            loss_mmt_label_vic=losses_mmt_label_vic,                                                # mmt_label
+            loss_cls_ant=losses_cls_ant,
+            loss_phithe_reg_ant=losses_phithe_reg_ant,
+            loss_mmt_reg_ant=losses_mmt_reg_ant,
+            loss_mmt_label_ant=losses_mmt_label_ant,
+        )
 
 
     # ##### ##### ##### ##### ##### ##### from base_dense_head.py ##### ##### ##### ##### ##### ##### #
 
 
-    def _predict_by_feat_single(self,
+    def _predict_by_feat_single_ant(self,
                                 cls_score_list: List[Tensor],
                                 phithe_reg_pred_list: List[Tensor],
                                 mmt_reg_pred_list: List[Tensor],
                                 mmt_label_score_list: List[Optional[Tensor]],
-                                img_meta: dict) -> InstanceData:
+                                img_meta: Optional[dict] = None,
+                                cfg: Optional[ConfigDict] = None,
+                                rescale: bool = False,
+                                with_nms: bool = True) -> InstanceData:
+        cfg = self.test_cfg if cfg is None else cfg
+        cfg = copy.deepcopy(cfg)
 
         device = cls_score_list[-1].device
 
-        anchors_flag, anchors_phi, anchors_the = self.get_anchors(
+        anchors_flag, anchors_phi, anchors_the = self.get_anchors_ant(
             [img_meta, ], device=device)
         anchors_flag = anchors_flag.transpose(0, 1)                                         # shape: N, 1
         priors = torch.cat([anchors_phi, anchors_the], dim=0).transpose(0, 1)               # shape: N, 2
@@ -1430,11 +1371,12 @@ class HEPRetinaHead(AnchorHead):
         phithe_reg_pred = phithe_reg_pred_list[-1].reshape(-1, self.phithe_reg_channels)    # shape: N, 2
         mmt_reg_pred = mmt_reg_pred_list[-1].reshape(-1, self.mmt_reg_channels)             # shape: N, 1
 
-        if self.use_mmt_label:
+        if self.use_mmt_token_for_label:
             mmt_label_score = mmt_label_score_list[-1].reshape(-1, self.mmt_label_channels)
-            _, mmt_labels = torch.max(mmt_label_score, dim=-1)
+            mmt_scores, mmt_labels = torch.max(mmt_label_score.sigmoid(), dim=-1)
         else:
             mmt_labels = torch.zeros((len(mmt_reg_pred), ), dtype=torch.long, device=device)
+            mmt_scores = torch.zeros((len(mmt_reg_pred), ), dtype=torch.float, device=device)
 
         if self.use_sigmoid_cls:
             scores = cls_score.sigmoid()
@@ -1448,7 +1390,7 @@ class HEPRetinaHead(AnchorHead):
         max_scores, max_labels = torch.max(scores, dim=-1)
         decoded_phithe = self.phithe_decode_base(phithe_reg_pred, priors, max_labels)
 
-        bboxes = self.phithe_to_bbox(decoded_phithe)
+        bboxes = self.phithe_to_bbox(decoded_phithe, max_labels)
         if self.mmt_encode_mode == 'base':
             mmts = self.mmt_decode_base(mmt_reg_pred)
         elif self.mmt_encode_mode == 'direct':
@@ -1458,18 +1400,110 @@ class HEPRetinaHead(AnchorHead):
         else:
             raise NotImplementedError
 
-        keep_idxs = self.nms_for_phithe(
-            max_scores, max_labels, decoded_phithe, # priors,
-            self.phithe_nms_thr, self.score_thr, self.max_per_img, device)
+        if self.nms_mode == 'phithe':
+            keep_idxs = self.nms_for_phithe(
+                max_scores, max_labels, decoded_phithe,
+                self.phithe_nms_thr, self.score_thr, self.max_per_img, device)
 
-        results = InstanceData()
-        results.bboxes = bboxes[keep_idxs]
-        results.mmts = mmts[keep_idxs]
-        results.mmt_labels = mmt_labels[keep_idxs]
-        results.scores = max_scores[keep_idxs]
-        results.labels = max_labels[keep_idxs]
+            results = InstanceData()
+            results.bboxes = bboxes[keep_idxs]
+            results.mmts = mmts[keep_idxs]
+            results.mmt_labels = mmt_labels[keep_idxs]
+            results.mmt_scores = mmt_scores[keep_idxs]
+            results.scores = max_scores[keep_idxs]
+            results.labels = max_labels[keep_idxs]
 
-        return results
+            return (results, max_scores, max_labels, bboxes, mmts, mmt_labels, mmt_scores)
+
+        elif self.nms_mode == 'bbox':
+            results = InstanceData()
+            results.bboxes = bboxes
+            results.mmts = mmts
+            results.mmt_labels = mmt_labels
+            results.mmt_scores = mmt_scores
+            results.scores = max_scores
+            results.labels = max_labels
+
+            return (self._bbox_post_process(
+                results=results,
+                cfg=cfg,
+                rescale=rescale,
+                with_nms=with_nms,
+                img_meta=img_meta), max_scores, max_labels, bboxes, mmts, mmt_labels, mmt_scores)
+
+        else:
+            raise NotImplementedError
+
+    def nms_for_phithe(self,
+                       scores, labels, phithe_preds, # priors,
+                       phithe_nms_thr, score_thr, max_per_img, device):
+        """
+        张量化实现的NMS操作，基于phi/theta坐标
+
+        Args:
+            scores: torch.Tensor [N] 置信度
+            labels: torch.Tensor [N] 类别标签
+            phithe_preds: torch.Tensor [N, 2] phi和theta预测值
+            # priors: torch.Tensor [N, 2] phi和theta先验值
+            phithe_nms_thr: float NMS阈值
+            score_thr: float 置信度阈值
+            max_per_img: int 每张图片最大保留数
+
+        Returns:
+            keep_indices: torch.Tensor [N] 需要保留的索引（已按scores降序排列）
+        """
+        N = len(scores)
+
+        # 对scores进行降序排列，并按这个排列索引重排对应的phithe_preds和priors
+        sorted_scores, sorted_indices = torch.sort(scores, descending=True)
+        sorted_labels = labels[sorted_indices]
+        sorted_phithe_preds = phithe_preds[sorted_indices]
+        # sorted_priors = priors[sorted_indices]
+
+        keep_mask = torch.ones(N, dtype=torch.bool, device=device)
+        keep_num = 0
+
+        for i in range(N):
+            # 如果已被抑制
+            if not keep_mask[i]: continue
+
+            # 最后一个必定不用抑制
+            if i == N - 1: break
+
+            # 当对应的score值小于score_thr时，包括当前的剩余keep_mask均标记为False
+            if sorted_scores[i] < score_thr:
+                keep_mask[i:] = False
+                break
+
+            # 当标为True的个数已达到max_per_img时，剩余keep_mask均标记为False
+            keep_num += 1
+            if keep_num >= max_per_img:
+                keep_mask[i+1:] = False
+                break
+
+            # 类似于NMS操作的：
+            # 对于一个score值对应的一对(phi_pred_high, the_pred_high)值和label_high值，
+            # 遍历所有更小score值对应的(phi_pred_low, the_pred_low)值和label_low值，
+            #     如果满足label_high==label_low，
+            #         且同时满足abs(phi_pred_low-phi_pred_high)<phithe_nms_thr & abs(the_pred_low-the_pred_high)<phithe_nms_thr，
+            #             则其keep_mask标记为False。
+            label_diff = torch.abs(sorted_labels[i+1:] - sorted_labels[i])
+            phi_pred_diff = torch.abs(sorted_phithe_preds[i+1:, 0] - sorted_phithe_preds[i, 0])
+            the_pred_diff = torch.abs(sorted_phithe_preds[i+1:, 1] - sorted_phithe_preds[i, 1])
+
+            label_close = (label_diff < self.eps)
+            pred_close = (phi_pred_diff < phithe_nms_thr) & (the_pred_diff < phithe_nms_thr)
+
+            suppress = (label_close & pred_close)
+
+            # 保留已标记的False，新增~suppress标记的False
+            keep_mask[i+1:] = keep_mask[i+1:] & (~suppress)
+
+        keep_indices = sorted_indices[keep_mask]
+        return keep_indices
+
+
+    # ##### ##### ##### ##### ##### ##### from base_dense_head.py ##### ##### ##### ##### ##### ##### #
 
 
     def get_positive_infos(self) -> InstanceList:
@@ -1500,28 +1534,15 @@ class HEPRetinaHead(AnchorHead):
             positive_infos.append(pos_info)
         return positive_infos
 
-    # def loss(self, x: Tuple[Tensor], batch_data_samples: SampleList) -> dict: pass
-
-    # @abstractmethod
-    # def loss_by_feat(self, **kwargs) -> dict: pass
-
-    # def loss_and_predict(
-    #     self,
-    #     x: Tuple[Tensor],
-    #     batch_data_samples: SampleList,
-    #     proposal_cfg: Optional[ConfigDict] = None
-    # ) -> Tuple[dict, InstanceList]: pass
-
-    # def predict(self,
-    #             x: Tuple[Tensor],
-    #             batch_data_samples: SampleList,
-    #             rescale: bool = False) -> InstanceList: pass
-
     def predict_by_feat(self,
                         cls_scores: List[Tensor],
                         bbox_preds: List[Tensor],
                         mmt_reg_preds: List[Optional[Tensor]],                                      # mmt
                         mmt_label_scores: List[Optional[Tensor]],                                   # mmt_label
+                        cls_scores_ant: List[Tensor],
+                        phithe_reg_preds_ant: List[Tensor],
+                        mmt_reg_preds_ant: List[Tensor],
+                        mmt_label_scores_ant: List[Optional[Tensor]],
                         score_factors: Optional[List[Tensor]] = None,
                         batch_img_metas: Optional[List[dict]] = None,
                         cfg: Optional[ConfigDict] = None,
@@ -1567,7 +1588,7 @@ class HEPRetinaHead(AnchorHead):
         """
         assert len(cls_scores) == len(bbox_preds)
         if self.use_mmt_reg: assert len(cls_scores) == len(mmt_reg_preds)                           # mmt
-        if self.use_mmt_label: assert len(cls_scores) == len(mmt_label_scores)                      # mmt_label
+        if self.mmt_label_use_gloattn: assert len(cls_scores) == len(mmt_label_scores)              # mmt_label
 
         if score_factors is None:
             # e.g. Retina, FreeAnchor, Foveabox, etc.
@@ -1598,10 +1619,22 @@ class HEPRetinaHead(AnchorHead):
                 mmt_reg_pred_list = select_single_mlvl(mmt_reg_preds, img_id, detach=True)
             else:
                 mmt_reg_pred_list = [None, ] * len(bbox_pred_list)
-            if self.use_mmt_label:                                                                  # mmt_label
+            if self.mmt_label_use_gloattn:                                                          # mmt_label
                 mmt_label_score_list = select_single_mlvl(mmt_label_scores, img_id, detach=True)
             else:
                 mmt_label_score_list = [None, ] * len(cls_score_list)
+
+            cls_score_ant_list = select_single_mlvl(
+                cls_scores_ant, img_id, detach=True)
+            phithe_reg_pred_ant_list = select_single_mlvl(
+                phithe_reg_preds_ant, img_id, detach=True)
+            mmt_reg_pred_ant_list = select_single_mlvl(
+                mmt_reg_preds_ant, img_id, detach=True)
+
+            if self.use_mmt_token_for_label:
+                mmt_label_score_ant_list = select_single_mlvl(mmt_label_scores_ant, img_id, detach=True)
+            else:
+                mmt_label_score_ant_list = [None, ] * len(cls_score_ant_list)
 
             if with_score_factors:
                 score_factor_list = select_single_mlvl(
@@ -1610,10 +1643,14 @@ class HEPRetinaHead(AnchorHead):
                 score_factor_list = [None for _ in range(num_levels)]
 
             results = self._predict_by_feat_single(
-                cls_score_list=cls_score_list,
-                bbox_pred_list=bbox_pred_list,
-                mmt_reg_pred_list=mmt_reg_pred_list,                                                # mmt
-                mmt_label_score_list=mmt_label_score_list,                                          # mmt_label
+                cls_score_list          = cls_score_list,
+                bbox_pred_list          = bbox_pred_list,
+                mmt_reg_pred_list       = mmt_reg_pred_list,
+                mmt_label_score_list    = mmt_label_score_list,
+                cls_score_ant_list          = cls_score_ant_list,
+                phithe_reg_pred_ant_list    = phithe_reg_pred_ant_list,
+                mmt_reg_pred_ant_list       = mmt_reg_pred_ant_list,
+                mmt_label_score_ant_list    = mmt_label_score_ant_list,
                 score_factor_list=score_factor_list,
                 mlvl_priors=mlvl_priors,
                 img_meta=img_meta,
@@ -1628,6 +1665,10 @@ class HEPRetinaHead(AnchorHead):
                                 bbox_pred_list: List[Tensor],
                                 mmt_reg_pred_list: List[Optional[Tensor]],                          # mmt
                                 mmt_label_score_list: List[Optional[Tensor]],                       # mmt_label
+                                cls_score_ant_list: List[Tensor],
+                                phithe_reg_pred_ant_list: List[Tensor],
+                                mmt_reg_pred_ant_list: List[Tensor],
+                                mmt_label_score_ant_list: List[Optional[Tensor]],
                                 score_factor_list: List[Tensor],
                                 mlvl_priors: List[Tensor],
                                 img_meta: dict,
@@ -1689,6 +1730,7 @@ class HEPRetinaHead(AnchorHead):
         mlvl_valid_priors = []
         mlvl_mmt_preds = []                                                                         # mmt
         mlvl_mmt_labels = []                                                                        # mmt_label
+        mlvl_mmt_scores = []                                                                        # mmt_label
         mlvl_scores = []
         mlvl_labels = []
         if with_score_factors:
@@ -1706,7 +1748,7 @@ class HEPRetinaHead(AnchorHead):
 
             assert cls_score.size()[-2:] == bbox_pred.size()[-2:]
             if self.use_mmt_reg: assert cls_score.size()[-2:] == mmt_reg_pred.size()[-2:]           # mmt
-            if self.use_mmt_label: assert cls_score.size()[-2:] == mmt_label_score.size()[-2:]      # mmt_label
+            if self.mmt_label_use_gloattn: assert cls_score.size()[-2:] == mmt_label_score.size()[-2:]      # mmt_label
 
             dim = self.bbox_coder.encode_size
             bbox_pred = bbox_pred.permute(1, 2, 0).reshape(-1, dim)
@@ -1716,11 +1758,12 @@ class HEPRetinaHead(AnchorHead):
             else:
                 mmt_reg_pred = torch.zeros((len(bbox_pred), self.mmt_reg_channels), device=bbox_pred.device)
 
-            if self.use_mmt_label:                                                                  # mmt_label
+            if self.mmt_label_use_gloattn:                                                          # mmt_label
                 mmt_label_score = mmt_label_score.permute(1, 2, 0).reshape(-1, self.mmt_label_channels)
-                mmt_label_score_max, mmt_label = torch.max(mmt_label_score, dim=-1)
+                mmt_score, mmt_label = torch.max(mmt_label_score.sigmoid(), dim=-1)
             else:
                 mmt_label = torch.zeros((len(bbox_pred), ), dtype=torch.long, device=bbox_pred.device)
+                mmt_score = torch.zeros((len(bbox_pred), ), dtype=torch.float, device=bbox_pred.device)
 
             if with_score_factors:
                 score_factor = score_factor.permute(1, 2,
@@ -1751,6 +1794,7 @@ class HEPRetinaHead(AnchorHead):
             priors = filtered_results['priors']
             mmt_reg_pred = mmt_reg_pred[keep_idxs]                                                  # mmt
             mmt_label = mmt_label[keep_idxs]                                                        # mmt_label
+            mmt_score = mmt_score[keep_idxs]                                                        # mmt_label
 
             if with_score_factors:
                 score_factor = score_factor[keep_idxs]
@@ -1759,6 +1803,7 @@ class HEPRetinaHead(AnchorHead):
             mlvl_valid_priors.append(priors)
             mlvl_mmt_preds.append(mmt_reg_pred)                                                     # mmt
             mlvl_mmt_labels.append(mmt_label)                                                       # mmt_label
+            mlvl_mmt_scores.append(mmt_score)                                                       # mmt_label
             mlvl_scores.append(scores)
             mlvl_labels.append(labels)
 
@@ -1781,109 +1826,66 @@ class HEPRetinaHead(AnchorHead):
         else:
             raise NotImplementedError
 
-        results = InstanceData()
-        results.bboxes = bboxes
-        results.mmts = mmts                                                                         # mmt
-        results.mmt_labels = torch.cat(mlvl_mmt_labels)                                             # mmt_label
-        results.scores = torch.cat(mlvl_scores)
-        results.labels = torch.cat(mlvl_labels)
-        if with_score_factors:
-            results.score_factors = torch.cat(mlvl_score_factors)
+        results_vic = InstanceData()
+        results_vic.bboxes = bboxes
+        results_vic.mmts = mmts                                                                         # mmt
+        results_vic.mmt_labels = torch.cat(mlvl_mmt_labels)                                             # mmt_label
+        results_vic.mmt_scores = torch.cat(mlvl_mmt_scores)                                             # mmt_label
+        results_vic.scores = torch.cat(mlvl_scores)
+        results_vic.labels = torch.cat(mlvl_labels)
 
-        return self._bbox_post_process(
-            results=results,
+        post_vic = self._bbox_post_process(
+            results=results_vic,
             cfg=cfg,
             rescale=rescale,
             with_nms=with_nms,
             img_meta=img_meta)
 
-    def _bbox_post_process(self,
-                           results: InstanceData,
-                           cfg: ConfigDict,
-                           rescale: bool = False,
-                           with_nms: bool = True,
-                           img_meta: Optional[dict] = None) -> InstanceData:
-        """bbox post-processing method.
+        (post_ant, 
+         max_scores_ant, max_labels_ant, bboxes_ant, 
+         mmts_ant, mmt_labels_ant, mmt_scores_ant) = self._predict_by_feat_single_ant(
+            cls_score_ant_list,
+            phithe_reg_pred_ant_list,
+            mmt_reg_pred_ant_list,
+            mmt_label_score_ant_list,
+            img_meta=img_meta,
+            cfg=cfg,
+            rescale=rescale,
+            with_nms=with_nms)
 
-        The boxes would be rescaled to the original image scale and do
-        the nms operation. Usually `with_nms` is False is used for aug test.
+        results_mix = InstanceData()
+        results_mix.bboxes = torch.cat([bboxes, bboxes_ant], dim=0)
+        results_mix.mmts = torch.cat([mmts, mmts_ant], dim=0)
+        results_mix.mmt_labels = torch.cat([torch.cat(mlvl_mmt_labels), mmt_labels_ant], dim=0)
+        results_mix.mmt_scores = torch.cat([torch.cat(mlvl_mmt_scores), mmt_scores_ant], dim=0)
+        results_mix.scores = torch.cat([torch.cat(mlvl_scores), max_scores_ant], dim=0)
+        results_mix.labels = torch.cat([torch.cat(mlvl_labels), max_labels_ant], dim=0)
 
-        Args:
-            results (:obj:`InstaceData`): Detection instance results,
-                each item has shape (num_bboxes, ).
-            cfg (ConfigDict): Test / postprocessing configuration,
-                if None, test_cfg would be used.
-            rescale (bool): If True, return boxes in original image space.
-                Default to False.
-            with_nms (bool): If True, do nms before return boxes.
-                Default to True.
-            img_meta (dict, optional): Image meta info. Defaults to None.
+        post_mix = self._bbox_post_process(
+            results=results_mix,
+            cfg=cfg,
+            rescale=rescale,
+            with_nms=with_nms,
+            img_meta=img_meta)
 
-        Returns:
-            :obj:`InstanceData`: Detection results of each image
-            after the post process.
-            Each item usually contains following keys.
-
-                - scores (Tensor): Classification scores, has a shape
-                  (num_instance, )
-                - labels (Tensor): Labels of bboxes, has a shape
-                  (num_instances, ).
-                - bboxes (Tensor): Has a shape (num_instances, 4),
-                  the last dimension 4 arrange as (x1, y1, x2, y2).
-        """
-
-        # NEW!
-        w_shift = img_meta.get('w_shift', 0)
-        if w_shift > 0:
-            img_shape = img_meta.get('img_shape')
-            assert w_shift == img_shape[1]
-
-            r_shift_px = img_meta.get('r_shift_px')
-            assert r_shift_px is not None
-
-            l_shift_px = r_shift_px - w_shift
-
-            bboxes = results.bboxes
-            bboxes_x_ctr = (bboxes[:, 0] + bboxes[:, 2]) * 0.5              # results['gt_bboxes']: xmin, ymin, xmax, ymax
-            r_ind = ((bboxes_x_ctr - r_shift_px) >= 0)                      # 判断向右平移的逆过程是否未越界
-
-            bboxes[r_ind, 0::2] -= r_shift_px
-            bboxes[~r_ind, 0::2] -= l_shift_px
-            results.bboxes = bboxes
-
-        if rescale:
-            assert img_meta.get('scale_factor') is not None
-            scale_factor = [1 / s for s in img_meta['scale_factor']]
-            results.bboxes = scale_boxes(results.bboxes, scale_factor)
-
-        if hasattr(results, 'score_factors'):
-            # TODO： Add sqrt operation in order to be consistent with
-            #  the paper.
-            score_factors = results.pop('score_factors')
-            results.scores = results.scores * score_factors
-
-        # filter small size bboxes
-        if cfg.get('min_bbox_size', -1) >= 0:
-            w, h = get_box_wh(results.bboxes)
-            valid_mask = (w > cfg.min_bbox_size) & (h > cfg.min_bbox_size)
-            if not valid_mask.all():
-                results = results[valid_mask]
-
-        # TODO: deal with `with_nms` and `nms_cfg=None` in test_cfg
-        if with_nms and results.bboxes.numel() > 0:
-            bboxes = get_box_tensor(results.bboxes)
-            det_bboxes, keep_idxs = batched_nms(bboxes, results.scores,
-                                                results.labels, cfg.nms)
-            results = results[keep_idxs]
-            # some nms would reweight the score, such as softnms
-            results.scores = det_bboxes[:, -1]
-            results = results[:cfg.max_per_img]
-
+        results = InstanceData()
+        results.bboxes =       self.x_choose(post_vic.bboxes,     post_ant.bboxes,     post_mix.bboxes,     self.phithe_source)
+        results.bboxes_confi = self.x_choose(post_vic.scores,     post_ant.scores,     post_mix.scores,     self.phithe_source)
+        results.mmts =         self.x_choose(post_vic.mmts,       post_ant.mmts,       post_mix.mmts,       self.mmt_source)
+        results.mmts_confi =   self.x_choose(post_vic.scores,     post_ant.scores,     post_mix.scores,     self.mmt_source)
+        results.mmt_labels =   self.x_choose(post_vic.mmt_labels, post_ant.mmt_labels, post_mix.mmt_labels, self.mmt_source)
+        results.mmt_scores =   self.x_choose(post_vic.mmt_scores, post_ant.mmt_scores, post_mix.mmt_scores, self.mmt_source)
+        results.scores =       self.x_choose(post_vic.scores,     post_ant.scores,     post_mix.scores,     self.phithe_source)
+        results.labels =       self.x_choose(post_vic.labels,     post_ant.labels,     post_mix.labels,     self.phithe_source)
         return results
 
-    # def aug_test(self,
-    #              aug_batch_feats,
-    #              aug_batch_img_metas,
-    #              rescale=False,
-    #              with_ori_nms=False,
-    #              **kwargs): pass
+    def x_choose(self, x_vic, x_ant, x_mix, source):
+        if source == 'vic':
+            return x_vic
+        elif source == 'ant':
+            return x_ant
+        elif source == 'mix':
+            return x_mix
+        else:
+            raise NotImplementedError
+

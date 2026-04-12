@@ -1,5 +1,5 @@
 # dataset settings
-dataset_type = 'Hep2SeqDataset'
+dataset_type = 'Hep2CocoDataset'
 data_root = 'data/HEP2COCO/Nm_1m/'
 
 # Example to use different file client
@@ -18,34 +18,22 @@ data_root = 'data/HEP2COCO/Nm_1m/'
 backend_args = None
 
 train_pipeline = [
-    dict(type='LoadSeqFromHEPv2',
-         use_random_permutation=True,
-         use_cyclic_phi=True,
-         len_seq=640),
-    dict(type='HEPv2LoadAnnotations'),
-    # 
     dict(type='LoadImageFromHEP', backend_args=backend_args,
-         bg_version='black_randn', snr_db=10.0),
+         bg_version='black', manual_rgb=False),
+    dict(type='HEPLoadAnnotations', with_bbox=True),
     dict(type='Resize', scale=(960, 480), keep_ratio=True),
     dict(type='RandomFlip', prob=0.5),
-    # 
-    dict(type='HEPv3PackDetInputs'),
+    dict(type='HEPPackDetInputs')
 ]
 test_pipeline = [
-    dict(type='LoadSeqFromHEPv2',
-         use_random_permutation=False,
-         use_cyclic_phi=True,
-         len_seq=640),
-    dict(type='HEPv2LoadAnnotations'),
-    # 
     dict(type='LoadImageFromHEP', backend_args=backend_args,
-         bg_version='black_randn_seed', snr_db=10.0),
+         bg_version='black', manual_rgb=False),
+    dict(type='HEPLoadAnnotations', with_bbox=True),
     dict(type='Resize', scale=(960, 480), keep_ratio=True),
-    # 
-    dict(type='HEPv3PackDetInputs',
-         meta_keys=('img_id', 'img_path', 'ori_shape', 'img_shape',
-                    'scale_factor', # 'flip', 'flip_direction',
-                    'n_hit_all', 'm_phi_all', 'm_the_all')),
+    dict(
+        type='HEPPackDetInputs',
+        meta_keys=('img_id', 'img_path', 'ori_shape', 'img_shape',
+                   'scale_factor'))
 ]
 
 # ##### ##### ##### ##### ##### ##### ##### ##### ##### ##### #

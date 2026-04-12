@@ -42,11 +42,12 @@ class LoadSeqFromHEPv2(BaseTransform):
             self.backend_args = None
 
     def check_phi(self, phi):
-        byd_min = (phi < -np.pi)
-        byd_max = (phi >= np.pi)
-        phi[byd_min] = phi[byd_min] + 2 * np.pi
-        phi[byd_max] = phi[byd_max] - 2 * np.pi
-        return phi
+        # byd_min = (phi < -np.pi)
+        # byd_max = (phi >= np.pi)
+        # phi[byd_min] = phi[byd_min] + 2 * np.pi
+        # phi[byd_max] = phi[byd_max] - 2 * np.pi
+        # return phi
+        return (phi + np.pi) % (2 * np.pi) - np.pi
 
     def create_hit_mask_for_flags(self, flags, eng):
         n_hit = len(flags)
@@ -70,7 +71,7 @@ class LoadSeqFromHEPv2(BaseTransform):
         return flags
 
     def transform(self, results: dict) -> Optional[dict]:
-        seq = np.zeros([self.len_seq, 5])
+        seq = np.zeros([self.len_seq, 7])   # flags, eng, phi_new, the, time, grid_x, grid_y
         n_hit_all = []
         # m_eng_all = []
         m_phi_all = []
@@ -106,6 +107,9 @@ class LoadSeqFromHEPv2(BaseTransform):
             else:
                 np_flags_new = np_ones + i
 
+            np_grid_x = (np_phi / np.pi)            # [-1, 1]
+            np_grid_y = (np_the / np.pi) * 2 - 1    # [-1, 1]
+
             b = n_hit * i
             e = n_hit * (i + 1)
             seq[b:e] = np.vstack([
@@ -114,6 +118,8 @@ class LoadSeqFromHEPv2(BaseTransform):
                 np_phi_new[permutation],
                 np_the[permutation],
                 np_time[permutation],
+                np_grid_x[permutation],
+                np_grid_y[permutation],
             ]).T
             n_hit_all.append(n_hit)
             # m_eng_all += (np_eng[permutation]).tolist()
@@ -132,7 +138,7 @@ class LoadSeqFromHEPv2(BaseTransform):
         img = np.zeros([480, 960, 3])
         results['img_shape'] = img.shape[:2]
         results['ori_shape'] = img.shape[:2]
-        results['scale_factor'] = 1.0
+        results['scale_factor'] = (1.0, 1.0)
 
         return results
 
