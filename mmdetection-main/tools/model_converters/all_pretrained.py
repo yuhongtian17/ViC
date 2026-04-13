@@ -19,8 +19,8 @@ def parse_option():
 if __name__ == '__main__':
     args = parse_option()
 
-    base_pth = torch.load(args.base_pth, map_location='cpu')
-    pt_pth = torch.load(args.pt_pth, map_location='cpu')
+    base_pth = torch.load(args.base_pth, map_location='cpu', weights_only=False)
+    pt_pth = torch.load(args.pt_pth, map_location='cpu', weights_only=False)
 
     for i in range(4):
         print("Layer {}:".format(i))

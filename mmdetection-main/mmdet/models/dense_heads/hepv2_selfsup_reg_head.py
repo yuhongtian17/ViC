@@ -318,7 +318,7 @@ class HEPv2SelfSupervisorREGHead(BaseModule):
             loss_eng, acc_eng, decoded_eng_pred, decoded_eng_target = self.loss_single('eng', pred[0], target[0], mask_eng)
             re = torch.abs(decoded_eng_pred - decoded_eng_target) / decoded_eng_target
             mre_eng = torch.sum(re[mask_eng]) / torch.sum(mask_eng)
-            count_eng = torch.sum(mask_eng)
+            count_eng = torch.sum(mask_eng) * 1.0
         else:
             loss_eng = torch.zeros(1, requires_grad=False)
             acc_eng = -torch.ones(1, requires_grad=False)
@@ -335,7 +335,7 @@ class HEPv2SelfSupervisorREGHead(BaseModule):
                                 decoded_phi_target,
                                 decoded_the_target - 0.5 * torch.pi)
             mab_phithe = torch.sum(ab[mask_phi]) / torch.sum(mask_phi)
-            count_phithe = torch.sum(mask_the)
+            count_phithe = torch.sum(mask_the) * 1.0
         else:
             loss_phi = torch.zeros(1, requires_grad=False)
             loss_the = torch.zeros(1, requires_grad=False)

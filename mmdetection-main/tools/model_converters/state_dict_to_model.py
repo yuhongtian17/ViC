@@ -18,7 +18,7 @@ def state_dict_to_model(
 ):
     len_old_keyword = len(old_keyword)
 
-    srcfile = torch.load(srcpath, map_location='cpu')
+    srcfile = torch.load(srcpath, map_location='cpu', weights_only=False)
     print("Open file \"{}\" successfully!".format(srcpath))
     destfile = {}
 

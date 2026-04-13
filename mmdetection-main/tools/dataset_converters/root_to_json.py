@@ -64,13 +64,15 @@ def create_single_obj(
 def root_to_json(
     srcroot: str,
     destroot: str,
-    df_prefix: str = "bbox_scale_10",
+    df_prefix: str = "Nm_1m",  # "bbox_scale_10",
     fn_prefix: str = "Nm_1m",
     split_size: int = 100000,
     width: int = 960,
     height: int = 480,
     Nm_scale: float = 10.0,
     Gamma_scale: float = 0.0,
+    image_i_min: int = 0,
+    image_i_max: int = 99999999,
 ):
     # 如果srcroot本身是一个文件
     if srcroot[-5:] == '.root':
@@ -129,6 +131,8 @@ def root_to_json(
     split_size_remain = split_size
     image_i_begin_ind = 0
     ann_i_begin_ind = 0
+
+    image_i_max_flag = False
 
     for srcfile_i, srcfile in enumerate(srcfiles):                          # 对于srcfiles里的每个root文件
         t1 = datetime.datetime.now()
@@ -212,8 +216,20 @@ def root_to_json(
             for event_i in tqdm(range(event_i_begin_ind, event_i_end_ind)):
 
                 # 检查溢出
-                if image_i > 99999999 or ann_i > 99999999:
+                if ann_i > 99999999:
                     raise NotImplementedError
+
+                if image_i < image_i_min:
+                    image_i += 1
+                    if Nm_scale > 0.0:
+                        ann_i += 1
+                    if Gamma_scale > 0.0:
+                        ann_i += 2
+                    continue
+
+                if image_i >= image_i_max:
+                    image_i_max_flag = True
+                    break
 
                 # 注意此处必须先进行强制类型转换，否则json.dump()会报错不支持的数据类型
                 # flag_cc: +1为正粒子，0为光子，-1为反粒子
@@ -299,6 +315,9 @@ def root_to_json(
                     print(data_dict)
                     data_dict_checked = True
 
+            # 立即退出
+            if image_i_max_flag: break
+
             split_size_remain -= event_i_range
             num_events_remain -= event_i_range
             event_i_begin_ind = event_i_end_ind
@@ -307,19 +326,20 @@ def root_to_json(
             json_end_flag = (split_size_remain == 0)
             all_end_flag = (srcfile_i == num_srcfiles - 1 and num_events_remain == 0)
             if json_end_flag or all_end_flag:
-                # e.g. Nm_1m__b00000001__e00100000.json
-                destfilename = "{}__b{:08}__e{:08}.json".format(fn_prefix, image_i_begin_ind + 1, image_i)
-                destfilename_list.append(destfilename)
-                destfile = os.path.join(destfolder, destfilename)
-                t4 = datetime.datetime.now()
+                if len(data_dict['images']) > 0:
+                    # e.g. Nm_1m__b00000001__e00100000.json
+                    destfilename = "{}__b{:08}__e{:08}.json".format(fn_prefix, image_i_begin_ind + 1, image_i)
+                    destfilename_list.append(destfilename)
+                    destfile = os.path.join(destfolder, destfilename)
+                    t4 = datetime.datetime.now()
 
-                with open(destfile, 'w') as f_out:
-                    json.dump(data_dict, f_out)
+                    with open(destfile, 'w') as f_out:
+                        json.dump(data_dict, f_out)
 
-                t5 = datetime.datetime.now()
-                print("[json]   : write to \"{}\" successfully! time: {}".format(destfile, t5 - t4))
-                print("ann_i: {} -> {}".format(ann_i_begin_ind + 1, ann_i))
-                print()
+                    t5 = datetime.datetime.now()
+                    print("[json]   : write to \"{}\" successfully! time: {}".format(destfile, t5 - t4))
+                    print("ann_i: {} -> {}".format(ann_i_begin_ind + 1, ann_i))
+                    print()
 
                 data_dict['images'] = []                                    # 重置data_dict['images']
                 data_dict['annotations'] = []                               # 重置data_dict['annotations']
@@ -329,6 +349,9 @@ def root_to_json(
 
             # 检查是否遍历完root文件
             if num_events_remain == 0: break
+
+        # 立即退出
+        if image_i_max_flag: break
 
     for temp in destfilename_list:
         print("\'{}\',".format(temp))
@@ -345,6 +368,8 @@ if __name__ == '__main__':
     parser.add_argument("--height", type = int, default = 480, help = "height")
     parser.add_argument("--Nm_scale", type = float, default = 10.0, help = "Nm scale")
     parser.add_argument("--Gamma_scale", type = float, default = 0.0, help = "Gamma scale")
+    parser.add_argument("--image_i_min", type = int, default = 0, help = "image_i_min")
+    parser.add_argument("--image_i_max", type = int, default = 99999999, help = "image_i_max")
     # 
     opt = parser.parse_args()
 
@@ -358,5 +383,7 @@ if __name__ == '__main__':
         height = opt.height,
         Nm_scale = opt.Nm_scale,
         Gamma_scale = opt.Gamma_scale,
+        image_i_min = opt.image_i_min,
+        image_i_max = opt.image_i_max,
     )
 

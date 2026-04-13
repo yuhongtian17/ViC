@@ -355,7 +355,7 @@ class HEPRetinaHead(AnchorHead):
             self.loss_mmt_label = MODELS.build(loss_mmt_label)
 
     # def load_pretrained(self, ckpt=""):
-    #     _ckpt = torch.load(open(ckpt, "rb"), map_location=torch.device("cpu"))
+    #     _ckpt = torch.load(open(ckpt, "rb"), map_location=torch.device("cpu"), weights_only=False)
     #     print(f"Successfully load ckpt {ckpt}")
 
     #     if self.pretrained_src == 'simmim':

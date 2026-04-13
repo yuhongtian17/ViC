@@ -78,7 +78,7 @@ model = dict(
         # 
         mmt_in_channels=768,
         mmt_use_fpn=False,                                  # ViC使用局部注意力回归动量
-        mmt_use_gloattn=True,                               # ViC使用全局注意力回归动量
+        mmt_use_gloattn=False,                              # ViC使用全局注意力回归动量
         mmt_label_use_gloattn=False,                        # ViC使用全局注意力回归全局标签
         # 
         trans_cfg=dict(
@@ -128,7 +128,7 @@ model = dict(
         max_per_img=1,                                      # phithe NMS的最多保留数量
         # 
         phithe_source='mix',                                # phi/the的采信分支（'vic' or 'ant' or 'mix'）
-        mmt_source='mix',                                   # 动量的采信分支（'vic' or 'ant' or 'mix'）
+        mmt_source='ant',                                   # 动量的采信分支（'vic' or 'ant' or 'mix'）
         # 
         init_cfg=dict(
             type='Pretrained',

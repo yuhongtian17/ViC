@@ -130,7 +130,7 @@ class Block(nn.Module):
             return x + identity
 
         if self.with_cp and x.requires_grad:
-            x = cp.checkpoint(_inner_forward, x, mask)
+            x = cp.checkpoint(_inner_forward, x, mask, use_reentrant=False)
         else:
             x = _inner_forward(x, mask)
 

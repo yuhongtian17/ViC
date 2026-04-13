@@ -1,31 +1,40 @@
-# Vision Calorimeter (ViC) and Anti-Neutron Transformer (ANT)
+# From ViC, to ANT, and then to MrCAL
 
 ## Vision Calorimeter for High-Energy Particle Detection
 
 <div align=center><img src="./figures/vic_figure_1.png"></div>
 
-In high-energy physics, estimating anti-neutron parameters (position and momentum) using the electromagnetic calorimeter (EMC) is crucial but challenging.
-To conquer this challenge, we propose Vision Calorimeter (ViC), a framework that migrates visual object detectors to analyze particle images.
-The motivation lies in introducing a physics-inspired heat-conduction operator (HCO) into the detector's backbone and head to handle the discrete and sparse patterns of these images.
-Implemented via the Discrete Cosine Transform, HCO extracts frequency-domain features, bridging the distribution gap between natural and particle images.
+In the field of high-energy particle physics, estimating anti-neutron parameters (position and momentum) using the electromagnetic calorimeter (EMC) is a fundamental yet challenging problem.
+To conquer this challenge, we propose Vision Calorimeter (ViC), an approach that migrates visual object detectors to analyze particle images.
+The motivation lies in introducing a physics-inspired heat-conduction operator (HCO) into the detector's backbone and head, to model the discrete and sparse patterns of these images.
+Based on physical heat-conduction, HCO is born with local-first prior and global receptive field, which benefit modeling the scattered energy of particle on EMC.
+Implemented via the Discrete Cosine Transform, HCO extracts frequency-domain features, which facilitates detecting discrete components of particle patterns.
 Experiments demonstrate that ViC significantly outperforms conventional methods, reducing the incident position prediction error by 46.16\% (from 17.31° to 9.32°) and providing the first baseline result with an incident momentum regression error of 21.48\%.
 This study underscores ViC's great potential as a reliable particle detector for high-energy physics.
-Code is available at https://github.com/yuhongtian17/ViC.
 
-## Anti-Neutron Transformer for High-Energy Particle Detection
+## Anti-Neutron Transformer Pre-trained with Position Cloze Procedure for High-Energy Particle Detection
 
 <div align=center><img src="./figures/ant_figure_2.png"></div>
 
-In the field of high-energy particle physics, anti-neutron ($\bar{n}$) serves as an important probe for studying fundamental units of the material world.
-Due to the discrete and sparse nature of data, it is challenging to measure the $\bar{n}$ features using machine learning algorithms.
-Recent studies have tackled the $\bar{n}$ detection problem using computer vision techniques, which, however, are puzzled by representation redundancy and model generalizability when processing discrete and sparse detector readouts.
-In this study, we propose the Anti‑Neutron Transformer (ANT), by handling the high-energy detection problem with inspiration from language processing.
-The motivation lies in the fact that Transformer models enjoy not only serialized representation consistent with discrete deposition patterns of $\bar{n}$ but also higher information density applicable to sparse data.
-We treat each $\bar{n}$ event as a "sentence" and each deposited energy point as a "word", constructing a token sequence for a Transformer model.
-The energy points also serve as spatial "anchors" for prediction, enabling the model to learn their correlations with the incident position and momentum of $\bar{n}$.
-ANT undergoes extensive pre-training on quantities of unlabeled $\bar{n}$ events to recover masked position values, providing underlying prior knowledge about spatial radiation patterns of energy.
-Experiments on high-energy particle data show that ANT achieves state-of-the-art performance, while outperforming visual detectors in terms of statistical analysis and physical application.
-Code is available at https://github.com/yuhongtian17/ViC.
+In high-energy particle physics, anti-neutron detection is an important yet challenging problem, as the energy hit responses of the electromagnetic calorimeter (EMC) are sparse, irregular and non-local.
+Conventional data processing algorithms largely depend on local energy distribution, which struggle to capture the structural relation between EMC responses and the position and momentum of anti-neutrons.
+In this study, we propose the Anti-Neutron Transformer (ANT), a representation learning approach that uses a single energy hit as the token unit and converts EMC readouts into a hit-token sequence.
+The key to building such a representation is the position cloze procedure (PCP), a pre-training strategy where the Transformer model removes and then recovers the positional information of selected high-energy hits.
+By recovering hit positions from surrounding energy magnitudes, PCP learns the implicit spatial structure prior of hits, thereby enabling the representation of the sparse, irregular and non-local hit patterns.
+This goes beyond the conventional masked autoencoder (MAE) that reconstructs content values given positional information.
+To pre-train ANT, we collect more than 11 million particle collision events and validate that ANT equipped with linear detection layers reduces the position prediction error from 17.31° to 9.17°.
+Moreover, ANT realizes anti-neutron momentum regression using deep learning for the first time, achieving a relative error of 20.78\%.
+
+## Learning physics-aligned representations for anti-neutron reconstruction in electromagnetic calorimeters
+
+<div align=center><img src="./figures/mrcal_figure_1.PNG"></div>
+
+A long-standing limitation in GeV-scale accelerator experiments is the reconstruction of long-lived neutral hadrons in current electromagnetic calorimeters (ECALs), where hadron-nucleus interactions fall outside the detector's native response regime.
+In this study, we develop a physics-aligned representation approach for anti-neutron reconstruction using a large corpus of real collision data.
+Motivated by two distinct energy deposit patterns in ECALs, we introduce a mixed-representation calorimetric network (MrCAL) that integrates visual and sequential representation branches within a unified object-detection architecture.
+This architecture is able to infer particle identity, momentum direction, and momentum magnitude simultaneously.
+Our approach improves the precision of anti-neutron momentum-direction reconstruction by up to 96\% and, for the first time, enables direct measurement of momentum magnitude from ECAL information alone, achieving approximately 17\% resolution at 1 GeV/c.
+Extensive generalization tests across diverse kinematic and background conditions demonstrate robust performance, supporting experimental viability and broader implications for out-of-domain detector design and operation.
 
 ## Dataset
 
@@ -50,14 +59,18 @@ source ~/.bashrc
 nvcc -V
 
 # NO sudo when install anaconda
-wget https://mirror.tuna.tsinghua.edu.cn/anaconda/archive/Anaconda3-2024.10-1-Linux-x86_64.sh
-chmod +x ./Anaconda3-2024.10-1-Linux-x86_64.sh
-./Anaconda3-2024.10-1-Linux-x86_64.sh
+# wget https://mirrors.pku.edu.cn/anaconda/archive/Anaconda3-2025.12-2-Linux-x86_64.sh
+wget https://mirror.tuna.tsinghua.edu.cn/anaconda/archive/Anaconda3-2025.12-2-Linux-x86_64.sh
+chmod +x ./Anaconda3-2025.12-2-Linux-x86_64.sh
+./Anaconda3-2025.12-2-Linux-x86_64.sh
 
 conda create -n openmmlab241b python=3.9 -y
 conda activate openmmlab241b
-# ref: https://pytorch.org/get-started/previous-versions/#v241
+pip -V
+
+# ref: https://pytorch.org/get-started/previous-versions/
 conda install pytorch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 pytorch-cuda=12.4 -c pytorch -c nvidia
+python -c "import torch; print(torch.__version__)"
 
 pip install pip==24.3.1 --index https://pypi.tuna.tsinghua.edu.cn/simple/
 pip install numpy==1.26.4 ninja==1.11.1.1 psutil==6.1.0 --index https://pypi.tuna.tsinghua.edu.cn/simple/
@@ -117,7 +130,7 @@ python ./tools/dataset_converters/root_to_json.py --srcroot "./data/BESIII_train
 mkdir -p "./data/pretrained/"
 cd "./data/pretrained/"
 wget https://github.com/MzeroMiko/vHeat/releases/download/vheatcls/vHeat_tiny.pth
-python ../../vheat_pth_tools/interpolate4downstream.py --pt_pth 'vHeat_tiny.pth' --tg_pth 'vheat_tiny_512.pth'
+python ../../tools/model_converters/interpolate4downstream.py --pt_pth 'vHeat_tiny.pth' --tg_pth 'vheat_tiny_512.pth'
 cd ../../
 
 # Train ViC
@@ -164,6 +177,20 @@ ulimit -n
 ```
 
 The output result is 1048576 instead of 1024, indicating successful modification.
+
+(3) An error may occur on Ubuntu 24.04 LTS when using python=3.9 for pip or torch. The installation can be updated to:
+
+```shell
+conda create -n openmmlab241d python=3.11 -y
+conda activate openmmlab241d
+pip -V
+
+pip install pip==24.3.1 --index https://pypi.tuna.tsinghua.edu.cn/simple/
+pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+python -c "import torch; print(torch.__version__)"
+```
+
+In torch 2.6.0, `weights_only=False` needs to be explicitly specified for `torch.load()`.
 
 ## License
 
